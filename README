@@ -1,0 +1,154 @@
+Linux notes:
+
+
+
+compiling OpenBLAS for Ryzen:
+
+make TARGET=ZEN
+make TARGET=ZEN PREFIX=/root/countreps install
+
+FLOAT in OpenBLAS/common.h conflicts with another definition & has to be
+renamed FLOAT_ when compiling openpose.
+
+
+
+OpenCV requires ffmpeg to read movie files but can only use ffmpeg in
+/usr/local.
+OpenCV must be built with GTK support.
+
+
+To build opencv:
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=/root/countreps/ ..
+
+make
+# this doesn't work
+make install
+# running this a 2nd time is what installs libopencv.so
+make
+
+
+
+
+to build openpose:
+
+Using only the CPU is too slow, but works:
+
+mkdir build
+cd build
+cmake \
+-DGPU_MODE=CPU_ONLY \
+-DUSE_MKL=n \
+-DOpenCV_INCLUDE_DIRS=/root/countreps/include \
+-DOpenCV_LIBS_DIR=/root/countreps/lib \
+-DCaffe_INCLUDE_DIRS=/root/countreps/include \
+-DCaffe_LIBS=/root/countreps/lib/libcaffe.so \
+-DBUILD_CAFFE=OFF \
+-DPROTOBUF_LIBRARY=/root/countreps/lib \
+-DProtobuf_INCLUDE_DIRS=/root/countreps/include \
+-DGLOG_INCLUDE_DIR=/root/countreps/include \
+-DGLOG_LIBRARY=/root/countreps/lib \
+-DGFLAGS_INCLUDE_DIR=/root/countreps/include \
+-DGFLAGS_LIBRARY=/root/countreps/lib \
+-DCMAKE_INSTALL_PREFIX=/root/countreps/ \
+..
+
+
+
+
+
+Running with a GPU requires CUDA & CUDNN.
+CUDA also requires manually loading the nvidia-uvm module.
+
+    insmod ./modules/4.9.39/kernel/drivers/video/nvidia-uvm.ko
+
+Caffe must be rebuilt with CUDA, then openpose.
+
+
+
+To build Caffe:
+
+edit caffe/Makefile.config
+    uncomment USE_CUDNN
+    comment out CPU_ONLY
+    comment out the required lines on the CUDA_ARCH line
+    edit BLAS_INCLUDE, BLAS_LIB, LIBRARY_DIRS to include /root/countreps
+    comment out the Q ?= @ line
+
+All the objects need -fPIC, but nvcc complains about it.  
+
+Placing -fPIC in NVCCFLAGS after -Xcompiler, CXXFLAGS, LINKFLAGS but not
+COMMON_FLAGS fixes it.
+
+PATH=$PATH:/root/countreps/bin make
+PATH=$PATH:/root/countreps/bin make distribute
+
+Comment out the tools/caffe.cpp: time() function if there's an undefined
+reference to caffe::caffe_gpu_dot
+
+The output goes in the distribute directory.
+
+cp -a bin/* /root/countreps/bin/
+cp -a include/* /root/countreps/include/
+cp -a lib/* /root/countreps/lib/
+cp -a proto/* /root/countreps/proto/
+cp -a python/* /root/countreps/python/
+
+
+
+
+
+
+To build openpose with CUDA:
+
+
+mkdir build
+cd build
+cmake \
+-DGPU_MODE=CUDA \
+-DUSE_MKL=n \
+-DOpenCV_INCLUDE_DIRS=/root/countreps/include \
+-DOpenCV_LIBS_DIR=/root/countreps/lib \
+-DCaffe_INCLUDE_DIRS=/root/countreps/include \
+-DCaffe_LIBS=/root/countreps/lib/libcaffe.so \
+-DBUILD_CAFFE=OFF \
+-DPROTOBUF_LIBRARY=/root/countreps/lib \
+-DProtobuf_INCLUDE_DIRS=/root/countreps/include \
+-DGLOG_INCLUDE_DIR=/root/countreps/include \
+-DGLOG_LIBRARY=/root/countreps/lib \
+-DGFLAGS_INCLUDE_DIR=/root/countreps/include \
+-DGFLAGS_LIBRARY=/root/countreps/lib \
+-DCMAKE_INSTALL_PREFIX=/root/countreps/ \
+..
+
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/countreps/lib make VERBOSE=1
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/countreps/lib make install
+
+All the dependancies have to be installed in the project directory.
+
+to compile countreps:
+
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`pwd`/lib make
+
+to run countreps:
+
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`pwd`/lib countreps
+
+
+A circular dependency on gflags creates a lot of problems for everyone.
+The gflags commands were taken out of countreps.c
+
+Input frames are in test_input.  Output frames are put in test_output.
+
+Using the CPU, it does 640x480 at 2.15 seconds per frame.
+
+Using CUDA on the GeForce GTX 1050, it's 14 frames per second.
+CUDA in 2GB of RAM requires reducing netInputSize to -1x256.
+
+
+
+
+
+
+

@@ -1,0 +1,128 @@
+Mac notes:
+
+Openpose officially doesn't support CUDA on MAC, but hope springs eternal.
+
+https://maelfabien.github.io/myblog//dl/open-pose/
+https://github.com/CMU-Perceptual-Computing-Lab/openpose/blob/master/doc/installation.md#operating-systems
+
+All the dependencies are system wide except caffe.
+
+The mac drivers are a rats nest of dependencies:
+
+Download CUDA, CUDNN, CUDA driver, & GPU driver for the current Macos
+version.  The drivers are not accessible from nvidia.com.
+
+
+https://www.nvidia.com/object/mac-driver-archive.html
+http://www.macvidcards.com/drivers.html
+
+Obsolete caffe instructions:
+
+http://caffe.berkeleyvision.org/installation.html#compilation
+
+"brew tap homebrew/science" fails but isn't necessary.
+
+Some necessary packages:
+brew install wget
+brew install pkg-config
+brew install cmake
+
+
+To compile, clone caffe from microsoft/github.
+
+edit caffe/Makefile.config
+    uncomment USE_CUDNN
+    comment out CPU_ONLY
+    comment out the required lines on the CUDA_ARCH line
+    comment out the Q ?= @ line
+
+
+ERRORS:
+
+Can't compile "using xyz = std::xyz" or no nullptr?
+
+In the Makefile, add -std=c++11 to CXXFLAGS +=  and to NVCCFLAGS without
+an -Xcompiler flag.  It must go directly to nvcc.  Nvcc is some kind of
+shitty wrapper for the host compiler that takes some options but
+requires other options to be wrapped in -Xcompiler flags.
+
+nvcc doesn't work with every clang++ version.   The version of clang++
+required by nvcc is given on 
+
+https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html
+
+It requires installing an obsolete XCode & running 
+
+sudo xcode-select -s /Applications/Obsolete XCode
+
+to select it.
+
+
+cannot link directly with ...vecLib...:
+
+in Makefile, comment out
+
+LDFLAGS += -framework vecLib
+
+Undefined symbol: cv::imread
+
+in Makefile, add LDFLAGS += `pkg-config --libs opencv`
+
+
+BUILDING IT:
+
+make builds it
+make distribute installs it in the distribute directory, but also attempts
+to build python modules.  make -i distribute ignores the python modules.
+
+Then install it in this directory:
+
+cp -a bin/* /Volumes/192.168.56.101/root/countreps.mac/bin/
+cp -a include/* /Volumes/192.168.56.101/root/countreps.mac/include/
+cp -a lib/* /Volumes/192.168.56.101/root/countreps.mac/lib/
+cp -a proto/* /Volumes/192.168.56.101/root/countreps.mac/proto/
+cp -a python/* /Volumes/192.168.56.101/root/countreps.mac/python/
+
+The openpose compilation:
+
+mkdir build
+cd build
+cmake \
+-DGPU_MODE=CUDA \
+-DUSE_MKL=n \
+-DCaffe_INCLUDE_DIRS=/Volumes/192.168.56.101/root/countreps.mac/include \
+-DCaffe_LIBS=/Volumes/192.168.56.101/root/countreps.mac/lib/libcaffe.so \
+-DBUILD_CAFFE=OFF \
+-DCMAKE_INSTALL_PREFIX=/Volumes/192.168.56.101/root/countreps.mac/ \
+..
+
+
+make
+make install
+
+Errors:
+Unknown CMake command "op_detect_darwin_version".
+
+comment out the Cuda.cmake line
+  op_detect_darwin_version(OSX_VERSION)
+
+
+To build countreps:
+
+make
+
+To run it, specify the library path:
+
+LD_LIBRARY_PATH=lib/ ./countreps
+
+
+ERROR:
+
+Can't parse message of type "caffe.NetParameter" because it is missing
+required fields: layer[0].clip_param.min, layer[0].clip_param.max
+
+The latest Caffe is officially broken.  
+Use revision f019d0dfe86f49d1140961f8c7dec22130c83154 of caffe.
+
+
+
