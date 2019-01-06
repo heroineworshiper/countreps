@@ -1,0 +1,161 @@
+// OpenPose dependencies
+#include <openpose/flags.hpp>
+#include <openpose/headers.hpp>
+
+
+//#include "quicktime.h"
+
+#define PATH "/home/mov/workout_test.mov"
+
+int main(int argc, char *argv[])
+{
+    gflags::ParseCommandLineFlags(&argc, &argv, true);
+
+// 	quicktime_t *fd;
+// 	fd = quicktime_open((char*)PATH, 1, 0);
+// 	if(!fd)
+// 	{
+// 		printf("process_file: couldn't open '%s'\n", PATH);
+// 		return 1;
+// 	}
+//     
+// 	int w = quicktime_video_width(fd, 0);
+// 	int h = quicktime_video_height(fd, 0);
+// 	int total = quicktime_video_length(fd, 0);
+//     
+//     
+//     printf("main %d w=%d h=%d total=%d\n", __LINE__, w, h, total);
+    
+    
+    
+    op::Wrapper opWrapper;
+
+// Pose configuration (use WrapperStructPose{} for default and recommended configuration)
+    const auto netInputSize = op::flagsToPoint(FLAGS_net_resolution, "-1x368");
+    const auto outputSize = op::flagsToPoint(FLAGS_output_resolution, "-1x-1");
+    const auto keypointScale = op::flagsToScaleMode(FLAGS_keypoint_scale);
+    const auto multipleView = (FLAGS_3d || FLAGS_3d_views > 1 || FLAGS_flir_camera);
+    const auto poseModel = op::flagsToPoseModel(FLAGS_model_pose);
+    const auto heatMapTypes = op::flagsToHeatMaps(FLAGS_heatmaps_add_parts, 
+        FLAGS_heatmaps_add_bkg,
+        FLAGS_heatmaps_add_PAFs);
+    const auto heatMapScale = op::flagsToHeatMapScaleMode(FLAGS_heatmaps_scale);
+    const bool enableGoogleLogging = true;
+
+    const op::WrapperStructPose wrapperStructPose
+    {
+        !FLAGS_body_disable, 
+        netInputSize, 
+        outputSize, 
+        keypointScale, 
+        FLAGS_num_gpu, 
+        FLAGS_num_gpu_start,
+        FLAGS_scale_number, 
+        (float)FLAGS_scale_gap, 
+        op::flagsToRenderMode(FLAGS_render_pose, multipleView),
+        poseModel, 
+        !FLAGS_disable_blending, 
+        (float)FLAGS_alpha_pose, 
+        (float)FLAGS_alpha_heatmap,
+        FLAGS_part_to_show, 
+        FLAGS_model_folder, 
+        heatMapTypes, 
+        heatMapScale, 
+        FLAGS_part_candidates,
+        (float)FLAGS_render_threshold, 
+        FLAGS_number_people_max, 
+        FLAGS_maximize_positives, 
+        FLAGS_fps_max,
+        enableGoogleLogging
+    };
+    opWrapper.configure(wrapperStructPose);
+
+
+// Face configuration (use op::WrapperStructFace{} to disable it)
+    const auto faceNetInputSize = op::flagsToPoint(FLAGS_face_net_resolution, "368x368 (multiples of 16)");
+        
+    const op::WrapperStructFace wrapperStructFace
+    {
+        FLAGS_face, 
+        faceNetInputSize, 
+        op::flagsToRenderMode(FLAGS_face_render, multipleView, FLAGS_render_pose),
+        (float)FLAGS_face_alpha_pose, 
+        (float)FLAGS_face_alpha_heatmap, 
+        (float)FLAGS_face_render_threshold
+    };
+    opWrapper.configure(wrapperStructFace);
+
+
+// Hand configuration (use op::WrapperStructHand{} to disable it)
+    const auto handNetInputSize = op::flagsToPoint(FLAGS_hand_net_resolution, "368x368 (multiples of 16)");
+    
+    const op::WrapperStructHand wrapperStructHand
+    {
+        FLAGS_hand, 
+        handNetInputSize, 
+        FLAGS_hand_scale_number, 
+        (float)FLAGS_hand_scale_range, 
+        FLAGS_hand_tracking,
+        op::flagsToRenderMode(FLAGS_hand_render, multipleView, FLAGS_render_pose), 
+        (float)FLAGS_hand_alpha_pose,
+        (float)FLAGS_hand_alpha_heatmap, 
+        (float)FLAGS_hand_render_threshold
+    };
+    opWrapper.configure(wrapperStructHand);
+
+// Extra functionality configuration (use op::WrapperStructExtra{} to disable it)
+    const op::WrapperStructExtra wrapperStructExtra
+    {
+        FLAGS_3d, 
+        FLAGS_3d_min_views, 
+        FLAGS_identification, 
+        FLAGS_tracking, 
+        FLAGS_ik_threads
+    };
+    opWrapper.configure(wrapperStructExtra);
+
+
+// Producer (use default to disable any input)
+    op::ProducerType producerType;
+    std::string producerString;
+    std::tie(producerType, producerString) = op::flagsToProducer(
+        FLAGS_image_dir, 
+        FLAGS_video, 
+        FLAGS_ip_camera, 
+        FLAGS_camera, 
+        FLAGS_flir_camera, 
+        FLAGS_flir_camera_index);
+    const auto cameraSize = op::flagsToPoint(FLAGS_camera_resolution, "-1x-1");
+
+    const op::WrapperStructInput wrapperStructInput
+    {
+        producerType, 
+        producerString, 
+        FLAGS_frame_first, 
+        FLAGS_frame_step, 
+        FLAGS_frame_last,
+        FLAGS_process_real_time, 
+        FLAGS_frame_flip, 
+        FLAGS_frame_rotate, 
+        FLAGS_frames_repeat,
+        cameraSize, 
+        FLAGS_camera_parameter_path, 
+        FLAGS_frame_undistort, 
+        FLAGS_3d_views
+    };
+    opWrapper.configure(wrapperStructInput);
+    
+    opWrapper.exec();
+    
+    
+    
+    
+    
+    return 0;
+}
+
+
+
+
+
+
