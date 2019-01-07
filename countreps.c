@@ -24,15 +24,41 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <math.h>
+#include <unistd.h>
+#include <semaphore.h>
+#include <pthread.h>
 
-#include <vector>
 
-#define INPATH "test_input"
-#define OUTPATH "test_output"
+// calculate the coordinates from test photos & write them to a file
+//#define DO_TEST_PHOTOS
+
+    // test photos go here
+    #define INPATH "test_input"
+    #define OUTPATH "test_output"
+    // coordinates go here
+    #define DEBUG_COORDS "debug_coords"
+
+// read the coordinates from DEBUG_COORDS & print the results
+//#define DO_TEST_FILE
+
+
+// start a server & wait for connections from the tablet
+#define DO_SERVER
+    #define PORT1 1234
+    #define PORT2 1244
+    #define BUFFER 0x100000
+
+
+#ifdef __clang__
+#define MODELS "../openpose.mac/models/"
+#else
 #define MODELS "../openpose/models/"
-#define TEXTLEN 1024
-#define DEBUG_COORDS "debug_coords"
+#endif
 
+#define TEXTLEN 1024
+
+// reps must be separated by this many frames
+#define DEBOUNCE 3
 
 // the body parts as defined in 
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -110,6 +136,86 @@ exercise_plan_t plan[] =
 using std::vector;
 
 
+
+
+// move frames from the network to openpose
+class FrameInput;
+
+std::shared_ptr<FrameInput> frame_input = nullptr;
+
+class FrameInput : public op::WorkerProducer<std::shared_ptr<std::vector<op::Datum>>>
+{
+public:
+    int done = 0;
+    sem_t frame_sema;
+    pthread_mutex_t frame_lock;
+
+    int have_frame = 0;
+    uint8_t buffer[BUFFER];
+    int frame_size;
+    
+    FrameInput()
+    {
+        printf("FrameInput::FrameInput %d\n", __LINE__);
+        sem_init(&frame_sema, 0, 0);
+	    pthread_mutexattr_t attr;
+	    pthread_mutexattr_init(&attr);
+	    pthread_mutex_init(&frame_lock, &attr);
+    }
+    
+    ~FrameInput()
+    {
+        printf("FrameInput::~FrameInput %d\n", __LINE__);
+        sem_destroy(&frame_sema);
+        pthread_mutex_destroy(&frame_lock);
+    }
+
+    void initializationOnThread() {}
+
+    std::shared_ptr<std::vector<op::Datum>> workProducer()
+    {
+// wait for the next frame or quit
+        while(1)
+        {
+            printf("FrameInput::workProducer %d\n", __LINE__);
+            sem_wait(&frame_sema);
+
+            pthread_mutex_lock(&frame_lock);
+            if(done)
+            {
+                pthread_mutex_unlock(&frame_lock);
+                this->stop();
+                return nullptr;
+            }
+
+            if(have_frame)
+            {
+
+                printf("FrameInput::workProducer %d\n", __LINE__);
+                // Create new datum
+                auto datumsPtr = std::make_shared<std::vector<op::Datum>>();
+                datumsPtr->emplace_back();
+                auto& datum = datumsPtr->at(0);
+
+                // Fill datum
+                cv::Mat rawData(1, frame_size, CV_8UC1, (void*)buffer);
+                datum.cvInputData = rawData;
+                
+                pthread_mutex_unlock(&frame_lock);
+                return datumsPtr;
+            }
+        }
+    
+        
+    }
+};
+
+
+
+
+
+
+
 class Process : public op::WorkerConsumer<std::shared_ptr<std::vector<op::Datum>>>
 {
 public:
@@ -118,6 +224,8 @@ public:
 // the reps detected
     int reps = 0;
     int prev_reps = 0;
+// frame the previous rep was detected on, for debouncing
+    int prev_rep_frame = 0;
     int pose = UNKNOWN_POSE;
     int prev_pose = UNKNOWN_POSE;
 // the current exercise
@@ -169,7 +277,10 @@ public:
             frames++;
         }
     }
-    
+
+
+#ifdef DO_TEST_PHOTOS
+// write coordinates to a file
     FILE *debug_fd = 0;
     void process(coord_t *coords)
     {
@@ -191,6 +302,16 @@ public:
 //        printf("%s\n", string2);
         fflush(debug_fd);
     }
+#endif // DO_TEST_PHOTOS
+
+
+
+#ifdef DO_SERVER
+    void process(coord_t *coords)
+    {
+    }
+#endif // DO_SERVER
+
 
 
 // process just based on the coordinates
@@ -387,6 +508,18 @@ public:
     }
 
 // increment the reps counter
+    int increment_reps()
+    {
+        if(frames - prev_rep_frame >= DEBOUNCE)
+        {
+            reps++;
+            prev_rep_frame = frames;
+        }
+        
+        
+        return reps;
+    }
+
     int calculate_reps()
     {
         switch(exercise)
@@ -394,7 +527,7 @@ public:
             case SITUPS:
                 if(prev_pose == SITUP_DOWN && pose == SITUP_UP)
                 {
-                    reps++;
+                    increment_reps();
                     prev_pose = pose;
                 }
                 else
@@ -407,7 +540,7 @@ public:
             case PUSHUPS:
                 if(prev_pose == PUSHUP_UP && pose == PUSHUP_DOWN)
                 {
-                    reps++;
+                    increment_reps();
                     prev_pose = pose;
                 }
                 else
@@ -421,7 +554,7 @@ public:
             case HIP_FLEX:
                 if(prev_pose == STANDING && pose == HIP_UP)
                 {
-                    reps++;
+                    increment_reps();
                     prev_pose = pose;
                 }
                 else
@@ -433,7 +566,7 @@ public:
             case SQUAT:
                 if(prev_pose == STANDING && pose == SQUAT_DOWN)
                 {
-                    reps++;
+                    increment_reps();
                     prev_pose = pose;
                 }
                 else
@@ -451,95 +584,22 @@ public:
 
 
 
-
-int main(int argc, char *argv[])
+void do_poser()
 {
-#if 1
-// process a debug file instead of using openpose
-    Process processor;
-    FILE *in = fopen(DEBUG_COORDS, "r");
-    if(!in)
-    {
-        printf("Couldn't open %s\n", DEBUG_COORDS);
-        exit(1);
-    }
-
-    char string[TEXTLEN];
-    while(!feof(in))
-    {
-        char *ptr = fgets(string, TEXTLEN, in);
-        if(!ptr)
-        {
-            break;
-        }
-
-// skip 1 space
-        while(*ptr != 0 && *ptr != ' ')
-        {
-            ptr++;
-        }
-        ptr++;
-
-// extract frame number
-        processor.frames = atoi(ptr);
-
-// skip 1 space
-        while(*ptr != 0 && *ptr != ' ')
-        {
-            ptr++;
-        }
-        ptr++;
-
-// extract floats
-        coord_t coords[BODY_PARTS];
-        for(int i = 0; i < BODY_PARTS; i++)
-        {
-            for(int j = 0; j < 2; j++)
-            {
-                float value;
-                sscanf(ptr, "%f", &value);
-                if(j == 0)
-                {
-                    coords[i].x = value;
-                }
-                else
-                {
-                    coords[i].y = value;
-                }
-
-// get next whitespace
-                while(*ptr != 0 && *ptr != ' ' && *ptr != ',')
-                {
-                    ptr++;
-                }
-
-// skip next whitespace
-                while(*ptr != 0 && (*ptr == ' ' || *ptr == ','))
-                {
-                    ptr++;
-                }
-            }
-            
-        }
-
-        processor.process2(coords);
-    }
-    
- 
 
 
-// DEBUG
-exit(0);
-#endif // 0
-
-
-    
 // start the pose estimator
-    
     op::Wrapper opWrapper;
     opWrapper.setWorker(op::WorkerType::Output, // workerType
         std::make_shared<Process>(), // worker
-        true); // const bool workerOnNewThread
+        false); // const bool workerOnNewThread
+
+// get input from a socket instead of test files
+#ifdef DO_SERVER
+    opWrapper.setWorker(op::WorkerType::Input, // workerType
+        frame_input, // worker
+        false); // const bool workerOnNewThread
+#endif
 
 // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
     const auto netInputSize = op::flagsToPoint("-1x160", "-1x160");
@@ -626,7 +686,8 @@ exit(0);
     opWrapper.configure(wrapperStructExtra);
 
 
-// Producer (use default to disable any input)
+// Get frames from test_input
+#ifndef DO_SERVER
     op::ProducerType producerType;
     std::string producerString;
     std::tie(producerType, producerString) = op::flagsToProducer(
@@ -658,6 +719,8 @@ exit(0);
     };
     opWrapper.configure(wrapperStructInput);
     
+    
+// write output frames to test_output
     const op::WrapperStructOutput wrapperStructOutput
     {
         -1.f, // FLAGS_cli_verbose
@@ -682,6 +745,8 @@ exit(0);
     opWrapper.configure(wrapperStructOutput);
 
 
+#endif // !DO_SERVER
+
 
 // GUI (comment or use default argument to disable any visual output)
     const op::WrapperStructGui wrapperStructGui
@@ -692,12 +757,314 @@ exit(0);
     };
     opWrapper.configure(wrapperStructGui);
 
-    
     opWrapper.exec();
+}
+
+
+
+void do_debug_file()
+{
+// read a debug file instead of using openpose to generate coordinates
+    Process processor;
+    FILE *in = fopen(DEBUG_COORDS, "r");
+    if(!in)
+    {
+        printf("Couldn't open %s\n", DEBUG_COORDS);
+        exit(1);
+    }
+
+    char string[TEXTLEN];
+    while(!feof(in))
+    {
+        char *ptr = fgets(string, TEXTLEN, in);
+        if(!ptr)
+        {
+            break;
+        }
+
+// skip 1 space
+        while(*ptr != 0 && *ptr != ' ')
+        {
+            ptr++;
+        }
+        ptr++;
+
+// extract frame number
+        processor.frames = atoi(ptr);
+
+// skip 1 space
+        while(*ptr != 0 && *ptr != ' ')
+        {
+            ptr++;
+        }
+        ptr++;
+
+// extract floats
+        coord_t coords[BODY_PARTS];
+        for(int i = 0; i < BODY_PARTS; i++)
+        {
+            for(int j = 0; j < 2; j++)
+            {
+                float value;
+                sscanf(ptr, "%f", &value);
+                if(j == 0)
+                {
+                    coords[i].x = value;
+                }
+                else
+                {
+                    coords[i].y = value;
+                }
+
+// get next whitespace
+                while(*ptr != 0 && *ptr != ' ' && *ptr != ',')
+                {
+                    ptr++;
+                }
+
+// skip next whitespace
+                while(*ptr != 0 && (*ptr == ' ' || *ptr == ','))
+                {
+                    ptr++;
+                }
+            }
+            
+        }
+
+        processor.process2(coords);
+    }
+}
+
+
+unsigned char reader_frame[BUFFER];
+unsigned char reader_buffer[BUFFER];
+
+// read frames from the socket on a thread
+void* reader_thread(void *ptr)
+{
+    int socket = *(int*)ptr;
     
+
+    #define SERVER_CODE0 0
+    #define SERVER_CODE1 1
+    #define SERVER_CODE2 2
+    #define SERVER_CODE3 3
+    #define SERVER_SIZE  4
+    #define SERVER_READ_FRAME 5
+    int state = SERVER_CODE0;
+    uint32_t frame_size = 0;
+    int counter = 0;
+    int bytes_read;
+    while(1)
+    {
+        bytes_read = read(socket, reader_buffer, BUFFER);
+        if(bytes_read <= 0)
+        {
+            break;
+        }
+
+        for(int i = 0; i < bytes_read; i++)
+        {
+            uint8_t c = reader_buffer[i];
+            switch(state)
+            {
+                case SERVER_CODE0:
+                    if(c == 0xb2)
+                    {
+                        state++;
+                    }
+                    break;
+                case SERVER_CODE1:
+                    if(c == 0x05)
+                    {
+                        state++;
+                    }
+                    else
+                    {
+                        state = SERVER_CODE0;
+                    }
+                    break;
+                case SERVER_CODE2:
+                    if(c == 0xad)
+                    {
+                        state++;
+                    }
+                    else
+                    {
+                        state = SERVER_CODE0;
+                    }
+                    break;
+                case SERVER_CODE3:
+                    if(c == 0x99)
+                    {
+                        state++;
+                        counter = 0;
+                        frame_size = 0;
+                    }
+                    else
+                    {
+                        state = SERVER_CODE0;
+                    }
+                    break;
+
+                case SERVER_SIZE:
+                    frame_size >>= 8;
+                    frame_size |= ((uint32_t)c << 24);
+                    counter++;
+                    if(counter >= 4)
+                    {
+                        state++;
+                        counter = 0;
+                    }
+                    break;
+
+                case SERVER_READ_FRAME:
+                    reader_frame[counter++] = c;
+                    if(counter >= frame_size)
+                    {
+                        state = SERVER_CODE0;
+                        printf("reader_thread %d: frame_size=%d\n", 
+                            __LINE__, 
+                            frame_size);
+// send to the poser
+                        pthread_mutex_lock(&frame_input->frame_lock);
+                        frame_input->have_frame = 1;
+                        frame_input->frame_size = frame_size;
+                        memcpy(frame_input->buffer, reader_frame, frame_size);
+                        pthread_mutex_unlock(&frame_input->frame_lock);
+                        sem_post(&frame_input->frame_sema);
+                    }
+                    break;
+            }
+        }
+
+    }
+
+    printf("reader_thread %d: connection closed\n", __LINE__);
+    close(socket);
+
+// signal the poser to finish
+    frame_input->done = 1;
+    sem_post(&frame_input->frame_sema);
     
+    return nullptr;
+}
+
+
+void do_server_connection(int socket)
+{
+// create the frame source
+    frame_input = std::make_shared<FrameInput>();
     
+// create the reader thread
+	pthread_attr_t  attr;
+	pthread_attr_init(&attr);
+	pthread_t reader_tid;
+
+	pthread_create(&reader_tid, 
+		0, 
+		reader_thread, 
+		&socket);
+
+
+// openpose must run on the mane thread for mac
     
+    do_poser();
+
+
+
+
+
+
+
+    printf("do_server_connection %d: poser finished\n", __LINE__);
+
+// wait for the poser to finish
+    pthread_join(reader_tid, nullptr);
+    printf("do_server_connection %d: reader finished\n", __LINE__);
+}
+
+
+
+void do_server()
+{
+    int socket_fd;
+	struct sockaddr_in addr;
+	if((socket_fd = socket(PF_INET, SOCK_STREAM, 0)) < 0)
+	{
+		printf("do_server %d: socket failed\n", __LINE__);
+		return;
+	}
+
+    int got_it = 0;
+    int port;
+    for(port = PORT1; port < PORT2; port++)
+    {
+	    addr.sin_family = AF_INET;
+	    addr.sin_port = htons((unsigned short)port);
+	    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	    if(bind(socket_fd, (struct sockaddr*)&addr, sizeof(addr)) >= 0)
+	    {
+            got_it = 1;
+            break;
+	    }
+    }
+    
+    if(!got_it)
+    {
+		printf("do_server %d: couldn't bind any port\n", __LINE__);
+		return;
+    }
+    
+	while(1)
+	{
+        printf("do_server %d: Waiting for connection on port %d\n", __LINE__, port);
+		if(listen(socket_fd, 1) < 0)
+		{
+			printf("do_server %d: listen failed\n", __LINE__);
+			return;
+		}
+
+		struct sockaddr_in clientname;
+		socklen_t size = sizeof(clientname);
+		int new_socket_fd;
+		if((new_socket_fd = accept(socket_fd,
+			(struct sockaddr*)&clientname,
+			&size)) < 0)
+		{
+			printf("do_server %d: accept failed\n", __LINE__);
+			return;
+		}
+        
+
+
+
+
+        do_server_connection(new_socket_fd);
+
+
+
+
+
+    }
+}
+
+
+
+int main(int argc, char *argv[])
+{
+#ifdef DO_TEST_FILE
+    do_debug_file();
+#endif // DO_TEST_FILE
+
+#ifdef DO_TEST_PHOTOS
+    do_poser(0);
+#endif // DO_TEST_PHOTOS
+    
+#ifdef DO_SERVER
+    do_server();
+#endif // DO_SERVER
     
     return 0;
 }

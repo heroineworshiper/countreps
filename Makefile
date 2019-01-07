@@ -1,18 +1,27 @@
-MAC_CFLAGS := \
+UNAME := $(shell uname)
+
+ifeq ($(UNAME), Darwin)
+
+CFLAGS := \
 	-std=c++11 \
 	-Iinclude \
         -Llib \
         -lopenpose \
-	-lpthread
+	-lpthread \
+        `pkg-config opencv --libs`
 
-MAC_CC := clang++
+CC := clang++
 
 
-OBJ_DIR := $(shell uname --machine)
+else
+
+
+
+
 OPENPOSE_DIR := /root/openpose
 OPENCV_DIR := /root/opencv-3.4.3/build
 OTHER_DIR := /root/colorize/include
-LINUX_CFLAGS := \
+CFLAGS := \
 	-std=c++11 \
 	-I$(OPENPOSE_DIR)/include \
 	-I$(OPENCV_DIR)/include \
@@ -22,14 +31,12 @@ LINUX_CFLAGS := \
         -lopenpose \
         -lopencv_core \
 	-lpthread
+CC := g++
+endif
 
+all: countreps.c
+	$(CC) -O2 -o countreps countreps.c $(CFLAGS)
 
-all: countreps_mac.c
-	$(MAC_CC) -O2 -o countreps_mac countreps_mac.c $(MAC_CFLAGS)
-
-
-countreps: countreps.c
-	g++ -O2 -o countreps countreps.c $(LINUX_CFLAGS)
 
 
 
