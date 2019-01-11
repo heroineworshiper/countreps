@@ -77,11 +77,11 @@ to build python modules.  make -i distribute ignores the python modules.
 
 Then install it in this directory:
 
-cp -a bin/* /Volumes/192.168.56.101/root/countreps.mac/bin/
-cp -a include/* /Volumes/192.168.56.101/root/countreps.mac/include/
-cp -a lib/* /Volumes/192.168.56.101/root/countreps.mac/lib/
-cp -a proto/* /Volumes/192.168.56.101/root/countreps.mac/proto/
-cp -a python/* /Volumes/192.168.56.101/root/countreps.mac/python/
+cp -a bin/* /Volumes/192.168.56.101/root/countreps/bin/
+cp -a include/* /Volumes/192.168.56.101/root/countreps/include/
+cp -a lib/* /Volumes/192.168.56.101/root/countreps/lib/
+cp -a proto/* /Volumes/192.168.56.101/root/countreps/proto/
+cp -a python/* /Volumes/192.168.56.101/root/countreps/python/
 
 The openpose compilation:
 
@@ -90,10 +90,10 @@ cd build
 cmake \
 -DGPU_MODE=CUDA \
 -DUSE_MKL=n \
--DCaffe_INCLUDE_DIRS=/Volumes/192.168.56.101/root/countreps.mac/include \
--DCaffe_LIBS=/Volumes/192.168.56.101/root/countreps.mac/lib/libcaffe.so \
+-DCaffe_INCLUDE_DIRS=/Volumes/192.168.56.101/root/countreps/include \
+-DCaffe_LIBS=/Volumes/192.168.56.101/root/countreps/lib/libcaffe.so \
 -DBUILD_CAFFE=OFF \
--DCMAKE_INSTALL_PREFIX=/Volumes/192.168.56.101/root/countreps.mac/ \
+-DCMAKE_INSTALL_PREFIX=/Volumes/192.168.56.101/root/countreps/ \
 ..
 
 

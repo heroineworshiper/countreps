@@ -1,3 +1,30 @@
+/*
+ * countreps
+ * Copyright (C) 2019 Adam Williams <broadcast at earthling dot net>
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * 
+ */
+
+
+
+
+
+
+
+
 // To build countreps:
 // 
 // LD_LIBRARY_PATH=lib/ make
@@ -6,8 +33,8 @@
 // 
 // LD_LIBRARY_PATH=lib/ ./countreps
 // 
-// install kernel module:
-// insmod ./4.9.39/kernel/drivers/video/nvidia-uvm.ko
+// install kernel module on Linux:
+// insmod /lib/modules/4.9.39/kernel/drivers/video/nvidia-uvm.ko
 
 
 // OpenPose dependencies
@@ -25,11 +52,18 @@
 #include <sys/types.h>
 #include <math.h>
 #include <unistd.h>
-#include <semaphore.h>
 #include <pthread.h>
 
 
-// calculate the coordinates from test photos & write them to a file
+#ifdef __clang__
+#include <dispatch/dispatch.h>
+#else
+#include <semaphore.h>
+#endif
+
+
+// calculate the coordinates from test_input & write them to DEBUG_COORDS
+// write output frames in test_output
 //#define DO_TEST_PHOTOS
 
     // test photos go here
@@ -38,8 +72,9 @@
     // coordinates go here
     #define DEBUG_COORDS "debug_coords"
 
-// read the coordinates from DEBUG_COORDS & print the results
-//#define DO_TEST_FILE
+// read the coordinates from DEBUG_COORDS & print the results without
+// using images
+#define LOAD_COORDS
 
 
 // start a server & wait for connections from the tablet
@@ -47,6 +82,18 @@
     #define PORT1 1234
     #define PORT2 1244
     #define BUFFER 0x100000
+    // read frames from test_input instead of the tablet
+    //#define SERVER_READFILES
+    // save frames from the tablet in test_input
+    //#define SAVE_INPUT
+    // save openpose output in test_output
+    //#define SAVE_OUTPUT
+    // save coordinates in DEBUG_COORDS
+    //#define SAVE_COORDS
+
+// show a window on the screen
+//#define USE_GUI
+
 
 
 #ifdef __clang__
@@ -58,7 +105,7 @@
 #define TEXTLEN 1024
 
 // reps must be separated by this many frames
-#define DEBOUNCE 3
+#define DEBOUNCE 4
 
 // the body parts as defined in 
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -132,8 +179,9 @@ exercise_plan_t plan[] =
 };
 #define TOTAL_PLANS (sizeof(plan) / sizeof(exercise_plan_t))
 
+// the current frame number
+int frames = 0;
 
-using std::vector;
 
 
 
@@ -142,12 +190,18 @@ using std::vector;
 class FrameInput;
 
 std::shared_ptr<FrameInput> frame_input = nullptr;
+int server_socket = -1;
 
 class FrameInput : public op::WorkerProducer<std::shared_ptr<std::vector<op::Datum>>>
 {
 public:
     int done = 0;
+#ifndef __clang__
     sem_t frame_sema;
+#else
+    dispatch_semaphore_t frame_sema;
+#endif
+
     pthread_mutex_t frame_lock;
 
     int have_frame = 0;
@@ -156,8 +210,13 @@ public:
     
     FrameInput()
     {
-        printf("FrameInput::FrameInput %d\n", __LINE__);
+#ifndef __clang__
         sem_init(&frame_sema, 0, 0);
+#else
+        frame_sema = dispatch_semaphore_create(0);
+#endif
+
+        printf("FrameInput::FrameInput %d\n", __LINE__);
 	    pthread_mutexattr_t attr;
 	    pthread_mutexattr_init(&attr);
 	    pthread_mutex_init(&frame_lock, &attr);
@@ -166,7 +225,13 @@ public:
     ~FrameInput()
     {
         printf("FrameInput::~FrameInput %d\n", __LINE__);
+
+#ifndef __clang__
         sem_destroy(&frame_sema);
+#else
+        dispatch_release(frame_sema);
+#endif
+
         pthread_mutex_destroy(&frame_lock);
     }
 
@@ -177,8 +242,15 @@ public:
 // wait for the next frame or quit
         while(1)
         {
-            printf("FrameInput::workProducer %d\n", __LINE__);
+
+#ifndef __clang__
             sem_wait(&frame_sema);
+#else
+            dispatch_semaphore_wait(frame_sema, DISPATCH_TIME_FOREVER);
+#endif
+
+//            printf("FrameInput::workProducer %d done=%d have_frame=%d\n", 
+//                __LINE__, done, have_frame);
 
             pthread_mutex_lock(&frame_lock);
             if(done)
@@ -187,22 +259,47 @@ public:
                 this->stop();
                 return nullptr;
             }
-
+            else
             if(have_frame)
             {
-
-                printf("FrameInput::workProducer %d\n", __LINE__);
+                have_frame = 0;
+                
                 // Create new datum
                 auto datumsPtr = std::make_shared<std::vector<op::Datum>>();
                 datumsPtr->emplace_back();
                 auto& datum = datumsPtr->at(0);
 
+#if defined(SAVE_INPUT) && !defined(SERVER_READFILES)
+                char string[TEXTLEN];
+                sprintf(string, "%s/frame%06d.jpg", 
+                    INPATH,
+                    frames);
+                FILE *fd = fopen(string, "w");
+                if(!fd)
+                {
+                    printf("FrameInput::workProducer %d couldn't open %s for writing.\n",
+                        __LINE__,
+                        string);
+                }
+                else
+                {
+                    fwrite(buffer, 1, frame_size, fd);
+                    fclose(fd);
+                }
+                
+#endif // SAVE_INPUT
+
+
                 // Fill datum
                 cv::Mat rawData(1, frame_size, CV_8UC1, (void*)buffer);
-                datum.cvInputData = rawData;
-                
+                datum.cvInputData = imdecode(rawData, cv::IMREAD_COLOR);
+
                 pthread_mutex_unlock(&frame_lock);
                 return datumsPtr;
+            }
+            else
+            {
+                pthread_mutex_unlock(&frame_lock);
             }
         }
     
@@ -219,8 +316,6 @@ public:
 class Process : public op::WorkerConsumer<std::shared_ptr<std::vector<op::Datum>>>
 {
 public:
-// the current frame number
-    int frames = 0;
 // the reps detected
     int reps = 0;
     int prev_reps = 0;
@@ -231,17 +326,20 @@ public:
 // the current exercise
     int plan_line = 0;
     int exercise = plan[plan_line].exercise;
-    
+    uint8_t packet[BUFFER];
+
     void initializationOnThread() {}
 
 // get raw data from openpose
     void workConsumer(const std::shared_ptr<std::vector<op::Datum>>& datumsPtr)
     {
         if (datumsPtr != nullptr && !datumsPtr->empty())
-        {
+        { 
             
             
             const auto& poseKeypoints = datumsPtr->at(0).poseKeypoints;
+            const auto& image = datumsPtr->at(0).cvOutputData;
+            
             printf("Process::workConsumer %d frame=%d lions=%d\n", 
                 __LINE__, 
                 frames,
@@ -272,17 +370,68 @@ public:
 
 
             }
-            
+
+
+
+#ifdef DO_SERVER
+            if(server_socket < 0)
+            {
+                this->stop();
+            }
+            else
+            {
+
+// send the image to the server
+                std::vector<uchar> buff;
+                std::vector<int> param(2);
+                param[0] = cv::IMWRITE_JPEG_QUALITY;
+                param[1] = 90;
+                imencode(".jpg", image, buff, param);
+                
+                
+                packet[0] = 0x9a;
+                packet[1] = 0x54;
+                packet[2] = 0x63;
+                packet[3] = 0xd3;
+                int image_size = buff.size();
+                packet[4] = image_size & 0xff;
+                packet[5] = (image_size >> 8) & 0xff;
+                packet[6] = (image_size >> 16) & 0xff;
+                packet[7] = (image_size >> 24) & 0xff;
+                for(int i = 0; i < image_size; i++)
+                {
+                    packet[8 + i] = buff.at(i);
+                }
+                write(server_socket, packet, 8 + image_size);
+
+// send the status to the server
+                packet[0] = 0x9a;
+                packet[1] = 0x54;
+                packet[2] = 0x63;
+                packet[3] = 0xd2;
+
+// show the previous exercise reps if on the 1st rep of the next exercise
+                int reps2 = reps;
+                if(reps == 0 && plan_line > 0)
+                {
+                    reps2 = plan[plan_line - 1].reps;
+                }
+                packet[4] = reps2;
+                packet[5] = exercise;
+                write(server_socket, packet, 6);
+                
+                
+            }
+#endif // DO_SERVER
             
             frames++;
         }
     }
 
 
-#ifdef DO_TEST_PHOTOS
 // write coordinates to a file
     FILE *debug_fd = 0;
-    void process(coord_t *coords)
+    void save_coords(coord_t *coords)
     {
         if(!debug_fd)
         {
@@ -299,24 +448,24 @@ public:
             strcat(string2, string);
         }
         fprintf(debug_fd, "%s\n", string2);
-//        printf("%s\n", string2);
         fflush(debug_fd);
     }
-#endif // DO_TEST_PHOTOS
 
 
 
-#ifdef DO_SERVER
+
+
+// convert the coordinates into reps
     void process(coord_t *coords)
     {
-    }
-#endif // DO_SERVER
+
+
+#if defined(SAVE_COORDS) && !defined(LOAD_COORDS)
+        save_coords(coords);
+#endif
 
 
 
-// process just based on the coordinates
-    void process2(coord_t *coords)
-    {
 //         char string[TEXTLEN];
 //         char string2[TEXTLEN];
 //         string2[0] = 0;
@@ -362,42 +511,183 @@ public:
         }
     }
 
+
+
+// returns if the body part was detected
+    int have_coord(coord_t *coords, int body_part)
+    {
+        if(coords[body_part].x > 0.001 &&
+            coords[body_part].y > 0.001)
+        {
+            return 1;
+        }
+        return 0;
+    }
+
+// get Y distance between 2 body parts
+    float get_ydistance(coord_t *coords, 
+        int body_part1, 
+        int body_part2,
+        int *have_it)
+    {
+        *have_it = 0;
+        if(!have_coord(coords, body_part1) ||
+            !have_coord(coords, body_part2))
+        {
+            return 0;
+        }
+
+        *have_it = 1;        
+        return abs(coords[body_part2].y - coords[body_part1].y);
+    }
+
+// get the maximum Y distance of both legs
+    float get_leg_dy(coord_t *coords, int *have_it)
+    {
+        *have_it = 0;
+
+        float result = 0;
+        int have = 0;
+        float distance = get_ydistance(coords, MODEL_HIP1, MODEL_ANKLE1, &have);
+        if(have)
+        {
+            result = distance;
+            *have_it = 1;
+        }
+
+
+        distance = get_ydistance(coords, MODEL_HIP2, MODEL_ANKLE2, &have);
+        if(have)
+        {
+            if(!*have_it || distance > result)
+            {
+                result = distance;
+            }
+            *have_it = 1;
+        }
+
+        if(!*have_it)
+        {
+            result = NAN;
+        }
+
+        return result;
+    }
+
+// get distance between 2 body parts
+    float get_distance(coord_t *coords, 
+        int body_part1, 
+        int body_part2,
+        int *have_it)
+    {
+        *have_it = 0;
+        if(!have_coord(coords, body_part1) ||
+            !have_coord(coords, body_part2))
+        {
+            return 0;
+        }
+
+        *have_it = 1;        
+        return hypot(coords[body_part2].y - coords[body_part1].y,
+            coords[body_part2].x - coords[body_part1].x);
+    }
+
+// get angle between 2 body parts
+    float get_angle(coord_t *coords, 
+        int body_part1, 
+        int body_part2,
+        int *have_it)
+    {
+        *have_it = 0;
+        if(!have_coord(coords, body_part1) ||
+            !have_coord(coords, body_part2))
+        {
+            return 0;
+        }
+
+// body parts are too close together
+        int have;
+        float distance = get_distance(coords, 
+            body_part1, 
+            body_part2,
+            &have);
+        if(!have || distance < 10)
+        {
+            return 0;
+        }
+
+        *have_it = 1;        
+        return -atan2(coords[body_part2].y - coords[body_part1].y,
+            coords[body_part2].x - coords[body_part1].x);
+    }
+
+// get the maximum knee angle
+    float get_knee_angle(coord_t *coords, int *have_it)
+    {
+        *have_it = 0;
+
+        float result = 0;
+        int have_knee = 0;
+        float knee = get_angle(coords, MODEL_HIP1, MODEL_KNEE1, &have_knee);
+        if(have_knee)
+        {
+            result = knee;
+            *have_it = 1;
+        }
+        
+        
+        knee = get_angle(coords, MODEL_HIP2, MODEL_KNEE2, &have_knee);
+        if(have_knee)
+        {
+            if(!*have_it || knee > result)
+            {
+                result = knee;
+            }
+            *have_it = 1;
+        }
+
+
+        if(!*have_it)
+        {
+            result = NAN;
+        }
+        return result;
+    }
+
+
+
     int get_exercise_pose(coord_t *coords)
     {
+        int have_butt = have_coord(coords, MODEL_BUTT);
+        int have_neck = have_coord(coords, MODEL_NECK);
+        int have_ankle1 = have_coord(coords, MODEL_ANKLE1);
+        int have_ankle2 = have_coord(coords, MODEL_ANKLE2);
 // Y distances
-        float butt_foot1_dist = fabs(coords[MODEL_ANKLE1].y - 
-            coords[MODEL_BUTT].y);
-        float butt_foot2_dist = fabs(coords[MODEL_ANKLE2].y - 
-            coords[MODEL_BUTT].y);
-        float max_butt_foot_dist = MAX(butt_foot1_dist, butt_foot2_dist);
-        int have_foot_dist = (coords[MODEL_ANKLE1].y > 0.001 &&
-            coords[MODEL_ANKLE2].y > 0.001);
+        int have_leg_dy = 0;
+        float leg_dy = get_leg_dy(coords, &have_leg_dy);
+
+// Y distance between ankles
+        int have_ankle_dy;
+        float ankle_dy = get_ydistance(coords, 
+            MODEL_ANKLE1, 
+            MODEL_ANKLE2,
+            &have_ankle_dy);
+
         
-        float butt_neck_dist = fabs(coords[MODEL_NECK].y - 
-            coords[MODEL_BUTT].y);
+        int have_back_dy = 0;
+        float back_dy = get_ydistance(coords, 
+            MODEL_NECK, 
+            MODEL_BUTT,
+            &have_back_dy);
 
 // angles
-        float butt_neck = get_angle(coords, MODEL_BUTT, MODEL_NECK);
-        float butt_knee1 = get_angle(coords, MODEL_BUTT, MODEL_KNEE1);
-        float butt_knee2 = get_angle(coords, MODEL_BUTT, MODEL_KNEE2);
-        float elbow1_neck = get_angle(coords, MODEL_ELBOW1, MODEL_SHOULDER1);
-        float elbow2_neck = get_angle(coords, MODEL_ELBOW2, MODEL_SHOULDER2);
-        float max_knee = 0;
-        int have_knee1 = (coords[MODEL_KNEE1].x > 0.001);
-        int have_knee2 = (coords[MODEL_KNEE2].x > 0.001);
-        if(!have_knee1)
-        {
-            max_knee = butt_knee2;
-        }
-        else
-        if(!have_knee2)
-        {
-            max_knee = butt_knee1;
-        }
-        else
-        {
-            max_knee = MAX(butt_knee1, butt_knee2);
-        }
+        int have_back;
+        float back = get_angle(coords, MODEL_BUTT, MODEL_NECK, &have_back);
+        int have_knee;
+        float knee = get_knee_angle(coords, &have_knee);
+// assume always facing right
+        int have_elbow;
+        float elbow = get_angle(coords, MODEL_ELBOW2, MODEL_SHOULDER2, &have_elbow);
         
         
         
@@ -407,15 +697,15 @@ public:
         switch(exercise)
         {
             case SITUPS:
-                if(butt_neck > TORAD(135) &&
-                    max_knee > TORAD(25))
+                if(have_back && back > TORAD(135) &&
+                    have_knee && knee > TORAD(25))
                 {
                     result = SITUP_DOWN;
                 }
                 else
-                if(butt_neck < TORAD(135) &&
-                    butt_neck > TORAD(90) &&
-                    max_knee > TORAD(25))
+                if(have_back && back < TORAD(135) &&
+                    have_back && back > TORAD(90) &&
+                    have_knee && knee > TORAD(25))
                 {
                     result = SITUP_UP;
                 }
@@ -423,20 +713,20 @@ public:
             
             case PUSHUPS:
 // only test pushups facing right, because of occluded left elbow
-                if(butt_neck > TORAD(0) &&
-                    butt_neck < TORAD(45) &&
-                    elbow2_neck > TORAD(60) &&
-                    (max_knee > TORAD(135) ||
-                    max_knee < TORAD(-90)))
+                if(have_back && back > TORAD(0) &&
+                    have_back && back < TORAD(45) &&
+                    have_elbow && elbow > TORAD(60) &&
+                    ((have_knee && knee > TORAD(135)) ||
+                    (have_knee && knee < TORAD(-90))))
                 {
                     result = PUSHUP_UP;
                 }
                 else
-                if(butt_neck > TORAD(0) &&
-                    butt_neck < TORAD(45) &&
-                    elbow2_neck < TORAD(25) &&
-                    (max_knee > TORAD(135) ||
-                    max_knee < TORAD(-90)))
+                if(have_back && back > TORAD(0) &&
+                    have_back && back < TORAD(45) &&
+                    have_elbow && elbow < TORAD(25) &&
+                    ((have_knee && knee > TORAD(135)) ||
+                    (have_knee && knee < TORAD(-90))))
                 {
                     result = PUSHUP_DOWN;
                 }
@@ -444,21 +734,24 @@ public:
             
             case HIP_FLEX:
 // hip flex or squat flex
-                if(butt_neck > TORAD(0) &&
-                    butt_neck < TORAD(120) &&
-                    max_knee < TORAD(-45) &&
-                    max_knee > TORAD(-120))
+                if(have_back && back > TORAD(0) &&
+                    have_back && back < TORAD(120) &&
+                    have_knee && knee < TORAD(-60) &&
+                    have_knee && knee > TORAD(-120))
                 {
                     result = STANDING;
                 }
 // hip flex.  Can't differentiate side.
                 else
-                if(butt_neck > TORAD(60) &&
-                    butt_neck < TORAD(120) &&
-                    max_knee > TORAD(-45) &&
-                    max_knee < TORAD(30) &&
-                    have_foot_dist &&
-                    max_butt_foot_dist > butt_neck_dist / 2)
+                if(have_back && back > TORAD(60) && // back upright
+                    have_back && back < TORAD(120) &&
+                    have_knee && knee > TORAD(-30) && // knee raised
+                    have_knee && knee < TORAD(30) && // not a squat
+                    have_ankle_dy &&   // ankles spread
+                    have_leg_dy &&
+                    have_back_dy &&
+                    ankle_dy > leg_dy / 3 &&
+                    leg_dy > back_dy)
                 {
                     result = HIP_UP;
                 }
@@ -466,33 +759,34 @@ public:
             
             case SQUAT:
 // hip flex or squat flex
-                if(butt_neck > TORAD(0) &&
-                    butt_neck < TORAD(120) &&
-                    max_knee < TORAD(-25) &&
-                    max_knee > TORAD(-120))
+                if(have_back && back > TORAD(0) &&
+                    have_back && back < TORAD(120) &&
+                    have_knee && knee < TORAD(-25) &&
+                    have_knee && knee > TORAD(-120))
                 {
                     result = STANDING;
                 }
                 else
 // squat flex
-                if(butt_neck > TORAD(0) &&
-                    butt_neck < TORAD(90) &&
-                    max_knee > TORAD(25) &&
-                    max_knee < TORAD(90))
+                if(have_back && back > TORAD(0) &&
+                    have_back && back < TORAD(90) &&
+                    have_knee && knee > TORAD(25) &&
+                    have_knee && knee < TORAD(90))
                 {
                     result = SQUAT_DOWN;
                 }
                 break;
         }
         
-        printf("Process.get_exercise_pose %d: frame=%d back=%d knees=%d %d elbows=%d %d pose=%d\n",
+        printf("Process.get_exercise_pose %d: frame=%d ankle_dy=%d leg_dy=%d back_dy=%d back=%d knee=%d elbow=%d pose=%d\n",
             __LINE__,
             frames,
-            (int)TODEG(butt_neck),
-            (int)TODEG(butt_knee1),
-            (int)TODEG(butt_knee2),
-            (int)TODEG(elbow1_neck),
-            (int)TODEG(elbow2_neck),
+            (int)ankle_dy,
+            (int)leg_dy,
+            (int)back_dy,
+            (int)TODEG(back),
+            (int)TODEG(knee),
+            (int)TODEG(elbow),
             result);
 
         return result;
@@ -500,21 +794,19 @@ public:
 
     }
 
-// get angle between 2 body parts
-    float get_angle(coord_t *coords, int body_part1, int body_part2)
-    {
-        return -atan2(coords[body_part2].y - coords[body_part1].y,
-            coords[body_part2].x - coords[body_part1].x);
-    }
 
-// increment the reps counter
+// increment the reps counter with debouncing
     int increment_reps()
     {
         if(frames - prev_rep_frame >= DEBOUNCE)
         {
             reps++;
-            prev_rep_frame = frames;
+// only reset the delay if it counts, so a legitimate rep doesn't get dropped
+//            prev_rep_frame = frames;
         }
+
+// always reset the delay so a series of rapid oscillations doesn't get through
+        prev_rep_frame = frames;
         
         
         return reps;
@@ -580,6 +872,9 @@ public:
         return reps;
     }
 
+
+
+
 };
 
 
@@ -596,10 +891,12 @@ void do_poser()
 
 // get input from a socket instead of test files
 #ifdef DO_SERVER
+    #ifndef SERVER_READFILES
     opWrapper.setWorker(op::WorkerType::Input, // workerType
         frame_input, // worker
         false); // const bool workerOnNewThread
-#endif
+    #endif // !SERVER_READFILES
+#endif // DO_SERVER
 
 // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
     const auto netInputSize = op::flagsToPoint("-1x160", "-1x160");
@@ -687,7 +984,7 @@ void do_poser()
 
 
 // Get frames from test_input
-#ifndef DO_SERVER
+#if !defined(DO_SERVER) || defined(SERVER_READFILES)
     op::ProducerType producerType;
     std::string producerString;
     std::tie(producerType, producerString) = op::flagsToProducer(
@@ -719,7 +1016,11 @@ void do_poser()
     };
     opWrapper.configure(wrapperStructInput);
     
-    
+#endif //!DO_SERVER || SERVER_READFILES
+
+
+
+#if defined(SAVE_OUTPUT) || defined(DO_TEST_PHOTOS)
 // write output frames to test_output
     const op::WrapperStructOutput wrapperStructOutput
     {
@@ -745,17 +1046,24 @@ void do_poser()
     opWrapper.configure(wrapperStructOutput);
 
 
-#endif // !DO_SERVER
+#endif // SAVE_OUTPUT || DO_TEST_PHOTOS
 
 
 // GUI (comment or use default argument to disable any visual output)
     const op::WrapperStructGui wrapperStructGui
     {
+#ifdef USE_GUI
+// show a window on the screen
         op::flagsToDisplayMode(-1, false), 
+#else // USE_GUI
+// draw info on the exported frames
+        op::flagsToDisplayMode(0, false), 
+#endif // !USE_GUI
         true, 
         false, // FLAGS_fullscreen
     };
     opWrapper.configure(wrapperStructGui);
+
 
     opWrapper.exec();
 }
@@ -790,7 +1098,7 @@ void do_debug_file()
         ptr++;
 
 // extract frame number
-        processor.frames = atoi(ptr);
+        frames = atoi(ptr);
 
 // skip 1 space
         while(*ptr != 0 && *ptr != ' ')
@@ -831,8 +1139,10 @@ void do_debug_file()
             
         }
 
-        processor.process2(coords);
+        processor.process(coords);
     }
+    
+    exit(0);
 }
 
 
@@ -842,9 +1152,6 @@ unsigned char reader_buffer[BUFFER];
 // read frames from the socket on a thread
 void* reader_thread(void *ptr)
 {
-    int socket = *(int*)ptr;
-    
-
     #define SERVER_CODE0 0
     #define SERVER_CODE1 1
     #define SERVER_CODE2 2
@@ -857,7 +1164,7 @@ void* reader_thread(void *ptr)
     int bytes_read;
     while(1)
     {
-        bytes_read = read(socket, reader_buffer, BUFFER);
+        bytes_read = read(server_socket, reader_buffer, BUFFER);
         if(bytes_read <= 0)
         {
             break;
@@ -923,16 +1230,23 @@ void* reader_thread(void *ptr)
                     if(counter >= frame_size)
                     {
                         state = SERVER_CODE0;
-                        printf("reader_thread %d: frame_size=%d\n", 
-                            __LINE__, 
-                            frame_size);
+//                         printf("reader_thread %d: frame_size=%d\n", 
+//                             __LINE__, 
+//                             frame_size);
 // send to the poser
                         pthread_mutex_lock(&frame_input->frame_lock);
                         frame_input->have_frame = 1;
                         frame_input->frame_size = frame_size;
                         memcpy(frame_input->buffer, reader_frame, frame_size);
                         pthread_mutex_unlock(&frame_input->frame_lock);
+
+
+#ifndef __clang__
                         sem_post(&frame_input->frame_sema);
+#else
+                        dispatch_semaphore_signal(frame_input->frame_sema);
+#endif
+
                     }
                     break;
             }
@@ -941,18 +1255,26 @@ void* reader_thread(void *ptr)
     }
 
     printf("reader_thread %d: connection closed\n", __LINE__);
-    close(socket);
+    close(server_socket);
+    server_socket = -1;
 
 // signal the poser to finish
     frame_input->done = 1;
+
+#ifndef __clang__
     sem_post(&frame_input->frame_sema);
+#else
+    dispatch_semaphore_signal(frame_input->frame_sema);
+#endif
     
     return nullptr;
 }
 
 
-void do_server_connection(int socket)
+void do_server_connection()
 {
+// reset the counter
+    frames = 0;
 // create the frame source
     frame_input = std::make_shared<FrameInput>();
     
@@ -964,7 +1286,7 @@ void do_server_connection(int socket)
 	pthread_create(&reader_tid, 
 		0, 
 		reader_thread, 
-		&socket);
+		0);
 
 
 // openpose must run on the mane thread for mac
@@ -1028,8 +1350,7 @@ void do_server()
 
 		struct sockaddr_in clientname;
 		socklen_t size = sizeof(clientname);
-		int new_socket_fd;
-		if((new_socket_fd = accept(socket_fd,
+		if((server_socket = accept(socket_fd,
 			(struct sockaddr*)&clientname,
 			&size)) < 0)
 		{
@@ -1041,7 +1362,7 @@ void do_server()
 
 
 
-        do_server_connection(new_socket_fd);
+        do_server_connection();
 
 
 
@@ -1054,9 +1375,9 @@ void do_server()
 
 int main(int argc, char *argv[])
 {
-#ifdef DO_TEST_FILE
+#ifdef LOAD_COORDS
     do_debug_file();
-#endif // DO_TEST_FILE
+#endif // LOAD_COORDS
 
 #ifdef DO_TEST_PHOTOS
     do_poser(0);
