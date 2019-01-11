@@ -25,13 +25,13 @@
 
 
 
-// To build countreps:
+// To build it:
 // 
-// LD_LIBRARY_PATH=lib/ make
+// ./make.sh
 // 
-// To run it, specify the library path:
+// To run it:
 // 
-// LD_LIBRARY_PATH=lib/ ./countreps
+// ./countreps.sh
 // 
 // install kernel module on Linux:
 // insmod /lib/modules/4.9.39/kernel/drivers/video/nvidia-uvm.ko
@@ -74,7 +74,7 @@
 
 // read the coordinates from DEBUG_COORDS & print the results without
 // using images
-#define LOAD_COORDS
+//#define LOAD_COORDS
 
 
 // start a server & wait for connections from the tablet
@@ -85,11 +85,11 @@
     // read frames from test_input instead of the tablet
     //#define SERVER_READFILES
     // save frames from the tablet in test_input
-    //#define SAVE_INPUT
+    #define SAVE_INPUT
     // save openpose output in test_output
-    //#define SAVE_OUTPUT
+    #define SAVE_OUTPUT
     // save coordinates in DEBUG_COORDS
-    //#define SAVE_COORDS
+    #define SAVE_COORDS
 
 // show a window on the screen
 //#define USE_GUI
@@ -106,6 +106,8 @@
 
 // reps must be separated by this many frames
 #define DEBOUNCE 4
+// minimum ms between frames
+#define MINIMUM_PERIOD 150
 
 // the body parts as defined in 
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -121,6 +123,7 @@
 #define MODEL_SHOULDER2 2
 #define MODEL_ANKLE1 14
 #define MODEL_ANKLE2 11
+#define MODEL_WRIST2 4
 #define BODY_PARTS 25
 
 
@@ -402,7 +405,7 @@ public:
                 {
                     packet[8 + i] = buff.at(i);
                 }
-                write(server_socket, packet, 8 + image_size);
+                int _ignore = write(server_socket, packet, 8 + image_size);
 
 // send the status to the server
                 packet[0] = 0x9a;
@@ -418,7 +421,7 @@ public:
                 }
                 packet[4] = reps2;
                 packet[5] = exercise;
-                write(server_socket, packet, 6);
+                _ignore = write(server_socket, packet, 6);
                 
                 
             }
@@ -593,6 +596,7 @@ public:
     }
 
 // get angle between 2 body parts
+// right=0 up=90 down=-90 left=180/-180
     float get_angle(coord_t *coords, 
         int body_part1, 
         int body_part2,
@@ -656,6 +660,7 @@ public:
 
 
 
+
     int get_exercise_pose(coord_t *coords)
     {
         int have_butt = have_coord(coords, MODEL_BUTT);
@@ -686,9 +691,12 @@ public:
         int have_knee;
         float knee = get_knee_angle(coords, &have_knee);
 // assume always facing right
-        int have_elbow;
-        float elbow = get_angle(coords, MODEL_ELBOW2, MODEL_SHOULDER2, &have_elbow);
+        int have_shoulder2;
+        float shoulder2 = get_angle(coords, MODEL_SHOULDER2, MODEL_ELBOW2, &have_shoulder2);
         
+        int have_elbow2;
+        float elbow2 = get_angle(coords, MODEL_ELBOW2, MODEL_WRIST2, &have_elbow2);
+
         
         
         int result = UNKNOWN_POSE;
@@ -715,21 +723,38 @@ public:
 // only test pushups facing right, because of occluded left elbow
                 if(have_back && back > TORAD(0) &&
                     have_back && back < TORAD(45) &&
-                    have_elbow && elbow > TORAD(60) &&
                     ((have_knee && knee > TORAD(135)) ||
                     (have_knee && knee < TORAD(-90))))
                 {
-                    result = PUSHUP_UP;
+                    if(have_elbow2 && 
+                        have_shoulder2 &&
+                        shoulder2 < TORAD(-45) &&
+                        shoulder2 > TORAD(-120) &&
+                        elbow2 < TORAD(-45) &&
+                        elbow2 > TORAD(-120))
+                    {
+                        result = PUSHUP_UP;
+                    }
+                    else
+                    if(have_elbow2 && 
+                        have_shoulder2 &&
+                        shoulder2 > TORAD(135) &&
+                        elbow2 > TORAD(-90) &&
+                        elbow2 < TORAD(0))
+                    {
+                        result = PUSHUP_DOWN;
+                    }
                 }
-                else
-                if(have_back && back > TORAD(0) &&
-                    have_back && back < TORAD(45) &&
-                    have_elbow && elbow < TORAD(25) &&
-                    ((have_knee && knee > TORAD(135)) ||
-                    (have_knee && knee < TORAD(-90))))
-                {
-                    result = PUSHUP_DOWN;
-                }
+
+printf("Process.get_exercise_pose %d: frame=%d back=%d knee=%d shoulder=%d elbow=%d pose=%d\n",
+__LINE__,
+frames,
+(int)back,
+(int)knee,
+(int)TODEG(shoulder2),
+(int)TODEG(elbow2),
+result);
+
                 break;
             
             case HIP_FLEX:
@@ -755,6 +780,15 @@ public:
                 {
                     result = HIP_UP;
                 }
+printf("Process.get_exercise_pose %d: frame=%d ankle_dy=%d leg_dy=%d back_dy=%d back=%d knee=%d pose=%d\n",
+__LINE__,
+frames,
+(int)ankle_dy,
+(int)leg_dy,
+(int)back_dy,
+(int)TODEG(back),
+(int)TODEG(knee),
+result);
                 break;
             
             case SQUAT:
@@ -778,16 +812,16 @@ public:
                 break;
         }
         
-        printf("Process.get_exercise_pose %d: frame=%d ankle_dy=%d leg_dy=%d back_dy=%d back=%d knee=%d elbow=%d pose=%d\n",
-            __LINE__,
-            frames,
-            (int)ankle_dy,
-            (int)leg_dy,
-            (int)back_dy,
-            (int)TODEG(back),
-            (int)TODEG(knee),
-            (int)TODEG(elbow),
-            result);
+//         printf("Process.get_exercise_pose %d: frame=%d ankle_dy=%d leg_dy=%d back_dy=%d back=%d knee=%d elbow=%d pose=%d\n",
+//             __LINE__,
+//             frames,
+//             (int)ankle_dy,
+//             (int)leg_dy,
+//             (int)back_dy,
+//             (int)TODEG(back),
+//             (int)TODEG(knee),
+//             (int)TODEG(elbow),
+//             result);
 
         return result;
         
@@ -1148,6 +1182,7 @@ void do_debug_file()
 
 unsigned char reader_frame[BUFFER];
 unsigned char reader_buffer[BUFFER];
+struct timeval last_frame_time;
 
 // read frames from the socket on a thread
 void* reader_thread(void *ptr)
@@ -1162,6 +1197,9 @@ void* reader_thread(void *ptr)
     uint32_t frame_size = 0;
     int counter = 0;
     int bytes_read;
+    gettimeofday(&last_frame_time, 0);
+    
+    
     while(1)
     {
         bytes_read = read(server_socket, reader_buffer, BUFFER);
@@ -1233,19 +1271,32 @@ void* reader_thread(void *ptr)
 //                         printf("reader_thread %d: frame_size=%d\n", 
 //                             __LINE__, 
 //                             frame_size);
+
+
+// drop if it came too soon
+                        struct timeval current_time;
+                        gettimeofday(&current_time, 0);
+                        int64_t time_diff = 
+                            (current_time.tv_sec * 1000 + current_time.tv_usec / 1000) -
+				            (last_frame_time.tv_sec * 1000 + last_frame_time.tv_usec / 1000);
+                        if(time_diff >= MINIMUM_PERIOD)
+                        {
+                            last_frame_time =current_time;
+
 // send to the poser
-                        pthread_mutex_lock(&frame_input->frame_lock);
-                        frame_input->have_frame = 1;
-                        frame_input->frame_size = frame_size;
-                        memcpy(frame_input->buffer, reader_frame, frame_size);
-                        pthread_mutex_unlock(&frame_input->frame_lock);
+                            pthread_mutex_lock(&frame_input->frame_lock);
+                            frame_input->have_frame = 1;
+                            frame_input->frame_size = frame_size;
+                            memcpy(frame_input->buffer, reader_frame, frame_size);
+                            pthread_mutex_unlock(&frame_input->frame_lock);
 
 
 #ifndef __clang__
-                        sem_post(&frame_input->frame_sema);
+                            sem_post(&frame_input->frame_sema);
 #else
-                        dispatch_semaphore_signal(frame_input->frame_sema);
+                            dispatch_semaphore_signal(frame_input->frame_sema);
 #endif
+                        }
 
                     }
                     break;

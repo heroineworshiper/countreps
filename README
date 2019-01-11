@@ -14,7 +14,8 @@ renamed FLOAT_ when compiling openpose.
 
 OpenCV requires ffmpeg to read movie files but can only use ffmpeg in
 /usr/local.
-OpenCV must be built with GTK support.
+OpenCV must be built with GTK support & JPEG support.
+
 
 
 To build opencv:

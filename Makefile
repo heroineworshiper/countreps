@@ -29,10 +29,13 @@ CFLAGS := \
         -L$(OPENCV_DIR)/lib \
         -L`pwd`/lib \
         -lopenpose \
-        -lopencv_core \
+        `PKG_CONFIG_PATH=$(OPENCV_DIR)/lib/pkgconfig/ pkg-config opencv --libs` \
 	-lpthread
 CC := g++
 endif
+
+
+
 
 #AVR_DIR := /root/arduino-1.6.0/hardware/tools/avr/bin/
 AVR_DIR := /amazon2/root/arduino-1.8.5/hardware/tools/avr/bin/
