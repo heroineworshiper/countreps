@@ -1,1 +1,1 @@
-LD_LIBRARY_PATH=lib/ make
+LD_LIBRARY_PATH=lib/ make $@

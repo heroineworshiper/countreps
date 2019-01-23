@@ -61,35 +61,38 @@
 #include <semaphore.h>
 #endif
 
+// test photos go here
+#define INPATH "test_input"
+// output photos go here
+#define OUTPATH "test_output"
+// coordinates go here
+#define DEBUG_COORDS "debug_coords"
 
 // calculate the coordinates from test_input & write them to DEBUG_COORDS
 // write output frames in test_output
 //#define DO_TEST_PHOTOS
 
-    // test photos go here
-    #define INPATH "test_input"
-    #define OUTPATH "test_output"
-    // coordinates go here
-    #define DEBUG_COORDS "debug_coords"
 
 // read the coordinates from DEBUG_COORDS & print the results without
-// using images
+// doing anything else
 //#define LOAD_COORDS
 
+// save coordinates in DEBUG_COORDS
+//#define SAVE_COORDS
 
 // start a server & wait for connections from the tablet
 #define DO_SERVER
     #define PORT1 1234
     #define PORT2 1244
     #define BUFFER 0x100000
+    // send processed frames to tablet.  Not enough bandwidth.  Need H264 to do it right.
+    //#define SEND_OUTPUT
     // read frames from test_input instead of the tablet
     //#define SERVER_READFILES
     // save frames from the tablet in test_input
     #define SAVE_INPUT
     // save openpose output in test_output
     #define SAVE_OUTPUT
-    // save coordinates in DEBUG_COORDS
-    #define SAVE_COORDS
 
 // show a window on the screen
 //#define USE_GUI
@@ -191,18 +194,48 @@ int frames = 0;
 
 // move frames from the network to openpose
 class FrameInput;
+class Process;
 
 std::shared_ptr<FrameInput> frame_input = nullptr;
+std::shared_ptr<Process> frame_output = nullptr;
 int server_socket = -1;
+pthread_mutex_t socket_lock;
+
+
+void lock_sema(void *ptr)
+{
+#ifndef __clang__
+    sem_t *sema = (sem_t*)ptr;
+    sem_wait(sema);
+#else
+    dispatch_semaphore_t *sema = (dispatch_semaphore_t*)ptr;
+    dispatch_semaphore_wait(*sema, DISPATCH_TIME_FOREVER);
+#endif
+}
+
+void unlock_sema(void *ptr)
+{
+#ifndef __clang__
+    sem_t *sema = (sem_t*)ptr;
+    sem_post(sema);
+#else
+    dispatch_semaphore_t *sema = (dispatch_semaphore_t*)ptr;
+    dispatch_semaphore_signal(*sema);
+#endif
+}
 
 class FrameInput : public op::WorkerProducer<std::shared_ptr<std::vector<op::Datum>>>
 {
 public:
     int done = 0;
 #ifndef __clang__
+// FrameInput waits for this
     sem_t frame_sema;
+// reader_thread waits for this
+    sem_t frame_processed_sema;
 #else
     dispatch_semaphore_t frame_sema;
+    dispatch_semaphore_t frame_processed_sema;
 #endif
 
     pthread_mutex_t frame_lock;
@@ -215,8 +248,10 @@ public:
     {
 #ifndef __clang__
         sem_init(&frame_sema, 0, 0);
+        sem_init(&frame_processed_sema, 0, 1);
 #else
         frame_sema = dispatch_semaphore_create(0);
+        frame_processed_sema = dispatch_semaphore_create(1);
 #endif
 
         printf("FrameInput::FrameInput %d\n", __LINE__);
@@ -231,8 +266,10 @@ public:
 
 #ifndef __clang__
         sem_destroy(&frame_sema);
+        sem_destroy(&frame_processed_sema);
 #else
         dispatch_release(frame_sema);
+        dispatch_release(frame_processed_sema);
 #endif
 
         pthread_mutex_destroy(&frame_lock);
@@ -242,15 +279,11 @@ public:
 
     std::shared_ptr<std::vector<op::Datum>> workProducer()
     {
-// wait for the next frame or quit
         while(1)
         {
 
-#ifndef __clang__
-            sem_wait(&frame_sema);
-#else
-            dispatch_semaphore_wait(frame_sema, DISPATCH_TIME_FOREVER);
-#endif
+// wait for the next frame or quit
+            lock_sema(&frame_sema);
 
 //            printf("FrameInput::workProducer %d done=%d have_frame=%d\n", 
 //                __LINE__, done, have_frame);
@@ -259,6 +292,7 @@ public:
             if(done)
             {
                 pthread_mutex_unlock(&frame_lock);
+                unlock_sema(&frame_processed_sema);
                 this->stop();
                 return nullptr;
             }
@@ -298,11 +332,13 @@ public:
                 datum.cvInputData = imdecode(rawData, cv::IMREAD_COLOR);
 
                 pthread_mutex_unlock(&frame_lock);
+                unlock_sema(&frame_processed_sema);
                 return datumsPtr;
             }
             else
             {
                 pthread_mutex_unlock(&frame_lock);
+                unlock_sema(&frame_processed_sema);
             }
         }
     
@@ -329,7 +365,15 @@ public:
 // the current exercise
     int plan_line = 0;
     int exercise = plan[plan_line].exercise;
-    uint8_t packet[BUFFER];
+// packet to send back to the tablet at the right time
+    uint8_t return_packet[BUFFER];
+    int return_size = 0;
+
+
+    ~Process()
+    {
+        printf("Process:~Process %d\n", __LINE__);
+    }
 
     void initializationOnThread() {}
 
@@ -342,11 +386,13 @@ public:
             
             const auto& poseKeypoints = datumsPtr->at(0).poseKeypoints;
             const auto& image = datumsPtr->at(0).cvOutputData;
+            coord_t output[BODY_PARTS];
             
             printf("Process::workConsumer %d frame=%d lions=%d\n", 
                 __LINE__, 
                 frames,
                 poseKeypoints.getSize(0));
+            bzero(output, sizeof(output));
             for (auto lion = 0 ; lion < poseKeypoints.getSize(0) ; lion++)
             {
                 const auto& bodyParts = poseKeypoints.getSize(1);
@@ -358,7 +404,6 @@ public:
                 if(bodyParts >= 25)
                 {
 // transfer the body parts to a simple array
-                    coord_t output[BODY_PARTS];
                     for(int body_part = 0; body_part < BODY_PARTS; body_part++)
                     {
                         float x = poseKeypoints[{ lion, body_part, 0 }];
@@ -376,7 +421,7 @@ public:
 
 
 
-#ifdef DO_SERVER
+#if defined(DO_SERVER) && !defined(DO_TEST_PHOTOS)
             if(server_socket < 0)
             {
                 this->stop();
@@ -384,44 +429,42 @@ public:
             else
             {
 
-// send the image to the server
-                std::vector<uchar> buff;
-                std::vector<int> param(2);
-                param[0] = cv::IMWRITE_JPEG_QUALITY;
-                param[1] = 90;
-                imencode(".jpg", image, buff, param);
-                
-                
-                packet[0] = 0x9a;
-                packet[1] = 0x54;
-                packet[2] = 0x63;
-                packet[3] = 0xd3;
-                int image_size = buff.size();
-                packet[4] = image_size & 0xff;
-                packet[5] = (image_size >> 8) & 0xff;
-                packet[6] = (image_size >> 16) & 0xff;
-                packet[7] = (image_size >> 24) & 0xff;
-                for(int i = 0; i < image_size; i++)
-                {
-                    packet[8 + i] = buff.at(i);
-                }
-                int _ignore = write(server_socket, packet, 8 + image_size);
 
-// send the status to the server
-                packet[0] = 0x9a;
-                packet[1] = 0x54;
-                packet[2] = 0x63;
-                packet[3] = 0xd2;
+
+// stuff return packet to send later
+                pthread_mutex_lock(&socket_lock);
+
+                if(return_size <= BUFFER - 6 - BODY_PARTS * 4)
+                {
+                    return_packet[return_size + 0] = 0x9a;
+                    return_packet[return_size + 1] = 0x54;
+                    return_packet[return_size + 2] = 0x63;
+                    return_packet[return_size + 3] = 0xd2;
 
 // show the previous exercise reps if on the 1st rep of the next exercise
-                int reps2 = reps;
-                if(reps == 0 && plan_line > 0)
-                {
-                    reps2 = plan[plan_line - 1].reps;
+                    int reps2 = reps;
+                    if(reps == 0 && plan_line > 0)
+                    {
+                        reps2 = plan[plan_line - 1].reps;
+                    }
+                    return_packet[return_size + 4] = reps2;
+                    return_packet[return_size + 5] = exercise;
+
+// send vector coordinates
+                    int offset = return_size + 6;
+                    for(int i = 0; i < BODY_PARTS; i++)
+                    {
+                        int x_i = output[i].x;
+                        int y_i = output[i].y;
+                        return_packet[offset + i * 4 + 0] = x_i & 0xff;
+                        return_packet[offset + i * 4 + 1] = (x_i >> 8) & 0xff;
+                        return_packet[offset + i * 4 + 2] = y_i & 0xff;
+                        return_packet[offset + i * 4 + 3] = (y_i >> 8) & 0xff;
+                    }
+
+                    return_size += 6 + BODY_PARTS * 4;
                 }
-                packet[4] = reps2;
-                packet[5] = exercise;
-                _ignore = write(server_socket, packet, 6);
+                pthread_mutex_unlock(&socket_lock);
                 
                 
             }
@@ -717,6 +760,12 @@ public:
                 {
                     result = SITUP_UP;
                 }
+printf("Process.get_exercise_pose %d: SITUPS frame=%d back=%d knee=%d pose=%d\n",
+__LINE__,
+frames,
+(int)TODEG(back),
+(int)TODEG(knee),
+result);
                 break;
             
             case PUSHUPS:
@@ -746,7 +795,7 @@ public:
                     }
                 }
 
-printf("Process.get_exercise_pose %d: frame=%d back=%d knee=%d shoulder=%d elbow=%d pose=%d\n",
+printf("Process.get_exercise_pose %d: PUSHUPS frame=%d back=%d knee=%d shoulder=%d elbow=%d pose=%d\n",
 __LINE__,
 frames,
 (int)back,
@@ -758,7 +807,7 @@ result);
                 break;
             
             case HIP_FLEX:
-// hip flex or squat flex
+// same rule for hip flex or squat flex
                 if(have_back && back > TORAD(0) &&
                     have_back && back < TORAD(120) &&
                     have_knee && knee < TORAD(-60) &&
@@ -780,7 +829,7 @@ result);
                 {
                     result = HIP_UP;
                 }
-printf("Process.get_exercise_pose %d: frame=%d ankle_dy=%d leg_dy=%d back_dy=%d back=%d knee=%d pose=%d\n",
+printf("Process.get_exercise_pose %d: HIP_FLEX frame=%d ankle_dy=%d leg_dy=%d back_dy=%d back=%d knee=%d pose=%d\n",
 __LINE__,
 frames,
 (int)ankle_dy,
@@ -792,10 +841,10 @@ result);
                 break;
             
             case SQUAT:
-// hip flex or squat flex
+// same rule for hip flex or squat flex
                 if(have_back && back > TORAD(0) &&
                     have_back && back < TORAD(120) &&
-                    have_knee && knee < TORAD(-25) &&
+                    have_knee && knee < TORAD(-60) &&
                     have_knee && knee > TORAD(-120))
                 {
                     result = STANDING;
@@ -809,6 +858,12 @@ result);
                 {
                     result = SQUAT_DOWN;
                 }
+printf("Process.get_exercise_pose %d: SQUAT frame=%d back=%d knee=%d pose=%d\n",
+__LINE__,
+frames,
+(int)TODEG(back),
+(int)TODEG(knee),
+result);
                 break;
         }
         
@@ -916,20 +971,17 @@ result);
 void do_poser()
 {
 
-
 // start the pose estimator
     op::Wrapper opWrapper;
     opWrapper.setWorker(op::WorkerType::Output, // workerType
-        std::make_shared<Process>(), // worker
+        frame_output, // worker
         false); // const bool workerOnNewThread
 
 // get input from a socket instead of test files
-#ifdef DO_SERVER
-    #ifndef SERVER_READFILES
+#if defined(DO_SERVER) && !defined(SERVER_READFILES) && !defined(DO_TEST_PHOTOS)
     opWrapper.setWorker(op::WorkerType::Input, // workerType
         frame_input, // worker
         false); // const bool workerOnNewThread
-    #endif // !SERVER_READFILES
 #endif // DO_SERVER
 
 // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
@@ -1018,7 +1070,7 @@ void do_poser()
 
 
 // Get frames from test_input
-#if !defined(DO_SERVER) || defined(SERVER_READFILES)
+#if !defined(DO_SERVER) || defined(SERVER_READFILES) || defined(DO_TEST_PHOTOS)
     op::ProducerType producerType;
     std::string producerString;
     std::tie(producerType, producerString) = op::flagsToProducer(
@@ -1182,7 +1234,6 @@ void do_debug_file()
 
 unsigned char reader_frame[BUFFER];
 unsigned char reader_buffer[BUFFER];
-struct timeval last_frame_time;
 
 // read frames from the socket on a thread
 void* reader_thread(void *ptr)
@@ -1197,7 +1248,6 @@ void* reader_thread(void *ptr)
     uint32_t frame_size = 0;
     int counter = 0;
     int bytes_read;
-    gettimeofday(&last_frame_time, 0);
     
     
     while(1)
@@ -1260,6 +1310,7 @@ void* reader_thread(void *ptr)
                     {
                         state++;
                         counter = 0;
+
                     }
                     break;
 
@@ -1273,31 +1324,32 @@ void* reader_thread(void *ptr)
 //                             frame_size);
 
 
-// drop if it came too soon
-                        struct timeval current_time;
-                        gettimeofday(&current_time, 0);
-                        int64_t time_diff = 
-                            (current_time.tv_sec * 1000 + current_time.tv_usec / 1000) -
-				            (last_frame_time.tv_sec * 1000 + last_frame_time.tv_usec / 1000);
-                        if(time_diff >= MINIMUM_PERIOD)
-                        {
-                            last_frame_time =current_time;
+// wait for the poser to release the frame
+// can't drop any frames for the pose classifier to work
+                        lock_sema(&frame_input->frame_processed_sema);
 
 // send to the poser
-                            pthread_mutex_lock(&frame_input->frame_lock);
-                            frame_input->have_frame = 1;
-                            frame_input->frame_size = frame_size;
-                            memcpy(frame_input->buffer, reader_frame, frame_size);
-                            pthread_mutex_unlock(&frame_input->frame_lock);
+                        pthread_mutex_lock(&frame_input->frame_lock);
+                        frame_input->have_frame = 1;
+                        frame_input->frame_size = frame_size;
+                        memcpy(frame_input->buffer, reader_frame, frame_size);
+                        pthread_mutex_unlock(&frame_input->frame_lock);
 
+                        unlock_sema(&frame_input->frame_sema);
 
-#ifndef __clang__
-                            sem_post(&frame_input->frame_sema);
-#else
-                            dispatch_semaphore_signal(frame_input->frame_sema);
-#endif
+// send buffered data to the tablet
+                        pthread_mutex_lock(&socket_lock);
+                        if(frame_output->return_size > 0)
+                        {
+//                            printf("reader_thread %d sending %d\n", __LINE__, frame_output->return_size);
+                            int _ignore = write(server_socket, 
+                                frame_output->return_packet,
+                                frame_output->return_size);
+                            fsync(server_socket);
+                            frame_output->return_size = 0;
                         }
-
+                        pthread_mutex_unlock(&socket_lock);
+//                        printf("reader_thread %d reading %d\n", __LINE__, frame_size);
                     }
                     break;
             }
@@ -1312,14 +1364,11 @@ void* reader_thread(void *ptr)
 // signal the poser to finish
     frame_input->done = 1;
 
-#ifndef __clang__
-    sem_post(&frame_input->frame_sema);
-#else
-    dispatch_semaphore_signal(frame_input->frame_sema);
-#endif
+    unlock_sema(&frame_input->frame_sema);
     
     return nullptr;
 }
+
 
 
 void do_server_connection()
@@ -1328,11 +1377,15 @@ void do_server_connection()
     frames = 0;
 // create the frame source
     frame_input = std::make_shared<FrameInput>();
+    frame_output = std::make_shared<Process>();
     
 // create the reader thread
 	pthread_attr_t  attr;
 	pthread_attr_init(&attr);
 	pthread_t reader_tid;
+    pthread_mutexattr_t attr2;
+    pthread_mutexattr_init(&attr2);
+    pthread_mutex_init(&socket_lock, &attr2);
 
 	pthread_create(&reader_tid, 
 		0, 
@@ -1341,7 +1394,6 @@ void do_server_connection()
 
 
 // openpose must run on the mane thread for mac
-    
     do_poser();
 
 
@@ -1352,9 +1404,11 @@ void do_server_connection()
 
     printf("do_server_connection %d: poser finished\n", __LINE__);
 
-// wait for the poser to finish
+// wait for the threads to finish
     pthread_join(reader_tid, nullptr);
-    printf("do_server_connection %d: reader finished\n", __LINE__);
+    frame_input = nullptr;
+    frame_output = nullptr;
+    printf("do_server_connection %d: threads finished\n", __LINE__);
 }
 
 
@@ -1431,10 +1485,10 @@ int main(int argc, char *argv[])
 #endif // LOAD_COORDS
 
 #ifdef DO_TEST_PHOTOS
-    do_poser(0);
+    do_poser();
 #endif // DO_TEST_PHOTOS
     
-#ifdef DO_SERVER
+#if defined(DO_SERVER) && !defined(DO_TEST_PHOTOS)
     do_server();
 #endif // DO_SERVER
     

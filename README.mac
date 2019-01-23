@@ -28,6 +28,23 @@ brew install pkg-config
 brew install cmake
 
 
+Building opencv in order to fix the webcam & fullscreen mode:
+
+brew uninstall opencv
+mkdir build
+cd build
+cmake -DCMAKE_INSTALL_PREFIX=/Volumes/192.168.56.101/root/countreps/ ..
+make
+make install
+
+Caffe & openpose need to be recompiled with additional flags to use the
+custom opencv.
+
+
+
+
+BUILDING CAFFE:
+
 To compile, clone caffe from microsoft/github.
 
 edit caffe/Makefile.config
@@ -36,6 +53,7 @@ edit caffe/Makefile.config
     comment out the required lines on the CUDA_ARCH line
     comment out the Q ?= @ line
 
+make builds it
 
 ERRORS:
 
@@ -66,7 +84,10 @@ LDFLAGS += -framework vecLib
 
 Undefined symbol: cv::imread
 
-in Makefile, add LDFLAGS += `pkg-config --libs opencv`
+the Makefile needs more lines:
+OPENCV_DIR := /Volumes/192.168.56.101/root/countreps/
+LDFLAGS += `PKG_CONFIG_PATH=$(OPENCV_DIR)lib/pkgconfig/ pkg-config --libs opencv`
+INCLUDE_DIRS += $(BLAS_INCLUDE) $(OPENCV_DIR)include
 
 
 BUILDING IT:
@@ -77,24 +98,32 @@ to build python modules.  make -i distribute ignores the python modules.
 
 Then install it in this directory:
 
-cp -a bin/* /Volumes/192.168.56.101/root/countreps/bin/
-cp -a include/* /Volumes/192.168.56.101/root/countreps/include/
-cp -a lib/* /Volumes/192.168.56.101/root/countreps/lib/
-cp -a proto/* /Volumes/192.168.56.101/root/countreps/proto/
-cp -a python/* /Volumes/192.168.56.101/root/countreps/python/
+cp -a distribute/bin/* /Volumes/192.168.56.101/root/countreps/bin/
+cp -a distribute/include/* /Volumes/192.168.56.101/root/countreps/include/
+cp -a distribute/lib/* /Volumes/192.168.56.101/root/countreps/lib/
+cp -a distribute/proto/* /Volumes/192.168.56.101/root/countreps/proto/
+cp -a distribute/python/* /Volumes/192.168.56.101/root/countreps/python/
 
-The openpose compilation:
+THE OPENPOSE COMPILATION:
 
 mkdir build
 cd build
 cmake \
 -DGPU_MODE=CUDA \
 -DUSE_MKL=n \
+-DOpenCV_INCLUDE_DIRS=/Volumes/192.168.56.101/root/countreps/include \
+-DOpenCV_LIBS_DIR=/Volumes/192.168.56.101/root/countreps/lib \
 -DCaffe_INCLUDE_DIRS=/Volumes/192.168.56.101/root/countreps/include \
 -DCaffe_LIBS=/Volumes/192.168.56.101/root/countreps/lib/libcaffe.so \
 -DBUILD_CAFFE=OFF \
 -DCMAKE_INSTALL_PREFIX=/Volumes/192.168.56.101/root/countreps/ \
 ..
+
+The function double Producer::get(const ProducerProperty property) crashes.
+You need to add to it:
+
+        if(this == nullptr) return 0;
+
 
 
 make

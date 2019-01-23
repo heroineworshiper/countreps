@@ -56,6 +56,8 @@ cmake \
 ..
 
 
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/countreps/lib make VERBOSE=1
+LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/root/countreps/lib make install
 
 
 

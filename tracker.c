@@ -23,13 +23,13 @@
 // make sure the virtual machine isn't bound to it.
 // the right webcam is being selected
 
-// To build tracker:
+// To build it:
 // 
-// LD_LIBRARY_PATH=lib/ make tracker
+// ./make.sh tracker
 // 
-// To run it, specify the library path:
+// To run it:
 // 
-// LD_LIBRARY_PATH=lib/ ./tracker
+// ./tracker.sh
 // 
 // install kernel module on Linux:
 // insmod /lib/modules/4.9.39/kernel/drivers/video/nvidia-uvm.ko
@@ -52,11 +52,14 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-// read frames from test_input instead of webcam
+
+// read input from a test file
 //#define LOAD_INPUT
+// load frames from test_input
+#define LOAD_TEST_INPUT
 
 // save openpose output in test_output
-//#define SAVE_OUTPUT
+#define SAVE_OUTPUT
 
 #define MAX_HUMANS 2
 // tilt moves down for lower numbers
@@ -87,7 +90,14 @@ float tilt = 16976;
 #define BODY_PARTS 25
 
 #define CLAMP(x, y, z) ((x) = ((x) < (y) ? (y) : ((x) > (z) ? (z) : (x))))
+#define TO_MS(x) ((x).tv_sec * 1000 + (x).tv_usec / 1000)
+
+// PID gain
 #define GAIN 0.5
+
+// size of frame to process.  Frame rate depends on aspect ratio.
+#define PROCESS_W 1280
+#define PROCESS_H 1280
 
 typedef struct
 {
@@ -199,6 +209,82 @@ void write_servos()
 }
 
 
+
+
+
+
+
+
+// read frames from the cam
+class FrameInput : public op::WorkerProducer<std::shared_ptr<std::vector<op::Datum>>>
+{
+public:
+    int initialized = 0;
+    cv::VideoCapture cap;
+
+    void initializationOnThread() {}
+
+    std::shared_ptr<std::vector<op::Datum>> workProducer()
+    {
+        struct timeval time1;
+        gettimeofday(&time1, 0);
+        
+        if(!initialized)
+        {
+#ifndef LOAD_INPUT
+// select the USB cam with our hack to cap_avfoundation_mac.mm
+            cap = cv::VideoCapture(1);
+#endif
+
+            initialized = 1;
+        }
+    
+// Create new datum
+        auto datumsPtr = std::make_shared<std::vector<op::Datum>>();
+        datumsPtr->emplace_back();
+        auto& datum = datumsPtr->at(0);
+
+#ifdef LOAD_INPUT
+        cv::Mat frame = cv::imread("test.jpg");
+#else
+        cv::Mat frame;
+        cap.read(frame);
+#endif
+
+        cv::Mat resized;
+        cv::resize(frame, 
+            resized, 
+            cv::Size(PROCESS_W, PROCESS_H), 
+            0, 
+            0, 
+            cv::INTER_LANCZOS4);
+//            cv::INTER_NEAREST);
+        struct timeval time2;
+        gettimeofday(&time2, 0);
+
+
+        printf("FrameInput %d w=%d h=%d time=%ld\n", 
+            __LINE__, 
+            frame.cols, 
+            frame.rows,
+            TO_MS(time2) - TO_MS(time1));
+
+// Fill datum with frame
+        datum.cvInputData = resized;
+        return datumsPtr;
+    }
+};
+
+
+
+
+
+
+
+
+
+
+
 class Process : public op::WorkerConsumer<std::shared_ptr<std::vector<op::Datum>>>
 {
 public:
@@ -217,8 +303,8 @@ public:
             width = image.cols;
             height = image.rows;
             center_x = width / 2;
-            center_y = height * 1 / 4;    
-//            center_y = height / 2;
+//            center_y = height * 1 / 4;    
+            center_y = height / 2;
             int humans = poseKeypoints.getSize(0);
             if(humans > MAX_HUMANS)
             {
@@ -292,12 +378,12 @@ public:
 // average top center X
                 total_x += (rect->x1 + rect->x2) / 2;
 // take highest Y
-                if(human == 0 || total_y > rect->y1)
-                {
-                    total_y = rect->y1;
-                }
+//                 if(human == 0 || total_y > rect->y1)
+//                 {
+//                     total_y = rect->y1;
+//                 }
 // take center Y
-//                total_y += (rect->y1 + rect->y2) / 2;
+                total_y += (rect->y1 + rect->y2) / 2;
             }
 // want the total_ point to be here
 
@@ -310,8 +396,8 @@ public:
 
                 int x_error = total_x - center_x;
                 int y_error = total_y - center_y;
-printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
-__LINE__, (int)total_x, rects[0].x1, rects[0].x2, x_error, y_error);
+// printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
+// __LINE__, (int)total_x, rects[0].x1, rects[0].x2, x_error, y_error);
                 float pan_change = GAIN * x_error;
                 float tilt_change = GAIN * y_error;
                 pan -= pan_change;
@@ -351,8 +437,15 @@ int main(int argc, char *argv[])
     init_servos();
     write_servos();
 
-// start the pose estimator
+
+// custom input
     op::Wrapper opWrapper;
+//     opWrapper.setWorker(op::WorkerType::Input, // workerType
+//         std::make_shared<FrameInput>(), // worker
+//         false); // const bool workerOnNewThread
+    
+
+
     opWrapper.setWorker(op::WorkerType::Output, // workerType
         std::make_shared<Process>(), // worker
         false); // const bool workerOnNewThread
@@ -443,24 +536,17 @@ int main(int argc, char *argv[])
     opWrapper.configure(wrapperStructExtra);
 
 
-// Get frames from test_input
+#ifdef LOAD_TEST_INPUT
     op::ProducerType producerType;
     std::string producerString;
     std::tie(producerType, producerString) = op::flagsToProducer(
-
-
-#ifdef LOAD_INPUT
-        INPATH, // FLAGS_image_dir
-#else
-        "", // FLAGS_image_dir
-#endif
+        "test_input", // FLAGS_image_dir
         "", // FLAGS_video
         "", // FLAGS_ip_camera
-        1, // FLAGS_camera -1: default webcam
+        -1, // FLAGS_camera -1: default webcam
         false, // FLAGS_flir_camera
         -1); // FLAGS_flir_camera_index
     const auto cameraSize = op::flagsToPoint("-1x-1", "-1x-1");
-//    const auto cameraSize = op::flagsToPoint("640x360", "640x360");
 
 
 
@@ -481,7 +567,7 @@ int main(int argc, char *argv[])
         -1, // FLAGS_3d_views
     };
     opWrapper.configure(wrapperStructInput);
-    
+#endif // LOAD_TEST_INPUT
 
 
 
@@ -496,7 +582,7 @@ int main(int argc, char *argv[])
         "", // FLAGS_write_coco_json
         "", // FLAGS_write_coco_foot_json
         0, // FLAGS_write_coco_json_variant
-        OUTPATH, // FLAGS_write_images
+        "test_output", // FLAGS_write_images
         "jpg", // FLAGS_write_images_format
         "", // FLAGS_write_video
         -1., // FLAGS_write_video_fps
@@ -520,7 +606,7 @@ int main(int argc, char *argv[])
 // show a window on the screen
         op::flagsToDisplayMode(-1, false), 
         true, 
-        true, // FLAGS_fullscreen
+        false, // FLAGS_fullscreen
     };
     opWrapper.configure(wrapperStructGui);
 
