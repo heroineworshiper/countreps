@@ -48,6 +48,9 @@ AVR_LFLAGS := -O2 -mmcu=atmega328p -Wl,--section-start=.text=0x0000 -nostdlib
 all: countreps.c
 	$(CC) -O2 -o countreps countreps.c $(CFLAGS)
 
+test: test.c
+	gcc -o test test.c
+
 tracker: tracker.c
 	$(CC) -O2 -o tracker tracker.c $(CFLAGS)
 

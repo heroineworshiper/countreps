@@ -53,7 +53,7 @@
 #include <math.h>
 #include <unistd.h>
 #include <pthread.h>
-
+#include <arpa/inet.h>
 
 #ifdef __clang__
 #include <dispatch/dispatch.h>
@@ -68,22 +68,22 @@
 // coordinates go here
 #define DEBUG_COORDS "debug_coords"
 
-// calculate the coordinates from test_input & write them to DEBUG_COORDS
+// read frames from test_input & write them to DEBUG_COORDS
 // write output frames in test_output
-//#define DO_TEST_PHOTOS
+//#define READ_INPUT
 
 
 // read the coordinates from DEBUG_COORDS & print the results without
 // doing anything else
 //#define LOAD_COORDS
 
-// save coordinates in DEBUG_COORDS
-//#define SAVE_COORDS
+// save coordinates to DEBUG_COORDS
+#define SAVE_COORDS
 
 // start a server & wait for connections from the tablet
 #define DO_SERVER
     #define PORT1 1234
-    #define PORT2 1244
+    #define PORT2 1235
     #define BUFFER 0x100000
     // send processed frames to tablet.  Not enough bandwidth.  Need H264 to do it right.
     //#define SEND_OUTPUT
@@ -199,6 +199,12 @@ class Process;
 std::shared_ptr<FrameInput> frame_input = nullptr;
 std::shared_ptr<Process> frame_output = nullptr;
 int server_socket = -1;
+int udp_read = -1;
+int udp_write = -1;
+struct sockaddr_in udp_write_addr;
+
+// TCP port bound
+int port;
 pthread_mutex_t socket_lock;
 
 
@@ -362,6 +368,14 @@ public:
     int prev_rep_frame = 0;
     int pose = UNKNOWN_POSE;
     int prev_pose = UNKNOWN_POSE;
+// maximum Y of either ankle during the last STANDING
+    int have_prev_ankle_y = 0;
+    int prev_ankle_y = -1;
+// leg length during the last STANDING
+    int have_prev_leg_dy = 0;
+    int prev_leg_dy = -1;
+    
+    
 // the current exercise
     int plan_line = 0;
     int exercise = plan[plan_line].exercise;
@@ -421,7 +435,7 @@ public:
 
 
 
-#if defined(DO_SERVER) && !defined(DO_TEST_PHOTOS)
+#if defined(DO_SERVER) && !defined(READ_INPUT)
             if(server_socket < 0)
             {
                 this->stop();
@@ -620,6 +634,36 @@ public:
         return result;
     }
 
+// get highest Y of 2 body parts
+    float get_highest_y(coord_t *coords, 
+        int *have_it, 
+        int body_part1, 
+        int body_part2)
+    {
+        *have_it = 0;
+        float result = 0;
+        if(have_coord(coords, body_part1))
+        {
+            result = coords[body_part1].y;
+            *have_it = 1;
+        }
+        
+        if(have_coord(coords, body_part2))
+        {
+            if(!*have_it || 
+                coords[body_part2].y < result)
+            {
+                result = coords[body_part2].y;
+                *have_it = 1;
+            }
+        }
+        
+        return result;
+    }
+    
+    
+    
+
 // get distance between 2 body parts
     float get_distance(coord_t *coords, 
         int body_part1, 
@@ -713,6 +757,13 @@ public:
 // Y distances
         int have_leg_dy = 0;
         float leg_dy = get_leg_dy(coords, &have_leg_dy);
+
+
+        int have_ankle_y = 0;
+        float ankle_y = get_highest_y(coords, 
+            &have_ankle_y, 
+            MODEL_ANKLE1, 
+            MODEL_ANKLE2);
 
 // Y distance between ankles
         int have_ankle_dy;
@@ -811,9 +862,14 @@ result);
                 if(have_back && back > TORAD(0) &&
                     have_back && back < TORAD(120) &&
                     have_knee && knee < TORAD(-60) &&
-                    have_knee && knee > TORAD(-120))
+                    have_knee && knee > TORAD(-120) &&
+                    have_leg_dy)
                 {
                     result = STANDING;
+                    have_prev_ankle_y = have_ankle_y;
+                    have_prev_leg_dy = have_leg_dy;
+                    prev_ankle_y = ankle_y;
+                    prev_leg_dy = leg_dy;
                 }
 // hip flex.  Can't differentiate side.
                 else
@@ -821,19 +877,23 @@ result);
                     have_back && back < TORAD(120) &&
                     have_knee && knee > TORAD(-30) && // knee raised
                     have_knee && knee < TORAD(30) && // not a squat
-                    have_ankle_dy &&   // ankles spread
-                    have_leg_dy &&
+                    have_ankle_y && 
+                    have_prev_ankle_y &&
+                    have_prev_leg_dy &&
+                    prev_ankle_y - ankle_y > prev_leg_dy / 3 &&
                     have_back_dy &&
-                    ankle_dy > leg_dy / 3 &&
-                    leg_dy > back_dy)
+                    prev_leg_dy > back_dy)
                 {
                     result = HIP_UP;
                 }
-printf("Process.get_exercise_pose %d: HIP_FLEX frame=%d ankle_dy=%d leg_dy=%d back_dy=%d back=%d knee=%d pose=%d\n",
+
+printf("Process.get_exercise_pose %d: HIP_FLEX frame=%d prev_ankle_dy=%d %d prev_leg_dy=%d %d back_dy=%d back=%d knee=%d pose=%d\n",
 __LINE__,
 frames,
-(int)ankle_dy,
-(int)leg_dy,
+have_ankle_y && have_prev_ankle_y,
+(int)(prev_ankle_y - ankle_y),
+have_prev_leg_dy,
+prev_leg_dy,
 (int)back_dy,
 (int)TODEG(back),
 (int)TODEG(knee),
@@ -971,14 +1031,14 @@ result);
 void do_poser()
 {
 
-// start the pose estimator
+// set the pose classifier as the output handler
     op::Wrapper opWrapper;
     opWrapper.setWorker(op::WorkerType::Output, // workerType
         frame_output, // worker
         false); // const bool workerOnNewThread
 
 // get input from a socket instead of test files
-#if defined(DO_SERVER) && !defined(SERVER_READFILES) && !defined(DO_TEST_PHOTOS)
+#if defined(DO_SERVER) && !defined(SERVER_READFILES) && !defined(READ_INPUT)
     opWrapper.setWorker(op::WorkerType::Input, // workerType
         frame_input, // worker
         false); // const bool workerOnNewThread
@@ -1070,7 +1130,7 @@ void do_poser()
 
 
 // Get frames from test_input
-#if !defined(DO_SERVER) || defined(SERVER_READFILES) || defined(DO_TEST_PHOTOS)
+#if !defined(DO_SERVER) || defined(SERVER_READFILES) || defined(READ_INPUT)
     op::ProducerType producerType;
     std::string producerString;
     std::tie(producerType, producerString) = op::flagsToProducer(
@@ -1106,7 +1166,7 @@ void do_poser()
 
 
 
-#if defined(SAVE_OUTPUT) || defined(DO_TEST_PHOTOS)
+#if defined(SAVE_OUTPUT) || defined(READ_INPUT)
 // write output frames to test_output
     const op::WrapperStructOutput wrapperStructOutput
     {
@@ -1132,7 +1192,7 @@ void do_poser()
     opWrapper.configure(wrapperStructOutput);
 
 
-#endif // SAVE_OUTPUT || DO_TEST_PHOTOS
+#endif // SAVE_OUTPUT || READ_INPUT
 
 
 // GUI (comment or use default argument to disable any visual output)
@@ -1244,21 +1304,24 @@ void* reader_thread(void *ptr)
     #define SERVER_CODE3 3
     #define SERVER_SIZE  4
     #define SERVER_READ_FRAME 5
+    #define FRAME_CODE 0x99
+    #define DISCONNECT_CODE 0x9a
     int state = SERVER_CODE0;
     uint32_t frame_size = 0;
     int counter = 0;
     int bytes_read;
+    int disconnected = 0;
     
     
-    while(1)
+    while(!disconnected)
     {
-        bytes_read = read(server_socket, reader_buffer, BUFFER);
+        bytes_read = read(udp_read, reader_buffer, BUFFER);
         if(bytes_read <= 0)
         {
             break;
         }
 
-        for(int i = 0; i < bytes_read; i++)
+        for(int i = 0; i < bytes_read && !disconnected; i++)
         {
             uint8_t c = reader_buffer[i];
             switch(state)
@@ -1290,11 +1353,18 @@ void* reader_thread(void *ptr)
                     }
                     break;
                 case SERVER_CODE3:
-                    if(c == 0x99)
+                    if(c == FRAME_CODE)
                     {
                         state++;
                         counter = 0;
                         frame_size = 0;
+                    }
+                    else
+                    if(c == DISCONNECT_CODE)
+                    {
+                        printf("reader_thread %d: disconnected\n", __LINE__);
+                        disconnected = 1;
+                        break;
                     }
                     else
                     {
@@ -1319,9 +1389,9 @@ void* reader_thread(void *ptr)
                     if(counter >= frame_size)
                     {
                         state = SERVER_CODE0;
-//                         printf("reader_thread %d: frame_size=%d\n", 
-//                             __LINE__, 
-//                             frame_size);
+                        printf("reader_thread %d: frame_size=%d\n", 
+                            __LINE__, 
+                            frame_size);
 
 
 // wait for the poser to release the frame
@@ -1342,10 +1412,20 @@ void* reader_thread(void *ptr)
                         if(frame_output->return_size > 0)
                         {
 //                            printf("reader_thread %d sending %d\n", __LINE__, frame_output->return_size);
-                            int _ignore = write(server_socket, 
-                                frame_output->return_packet,
-                                frame_output->return_size);
-                            fsync(server_socket);
+//                             int _ignore = write(udp_write, 
+//                                 frame_output->return_packet,
+//                                 frame_output->return_size);
+
+
+                            int _ignore = sendto(udp_write, 
+                                frame_output->return_packet, 
+                                frame_output->return_size, 
+                                MSG_CONFIRM, 
+                                (const struct sockaddr *) &udp_write_addr,  
+                                sizeof(udp_write_addr)); 
+
+printf("reader_thread %d sending size=%d result=%d\n", __LINE__, frame_output->return_size, _ignore);
+
                             frame_output->return_size = 0;
                         }
                         pthread_mutex_unlock(&socket_lock);
@@ -1359,7 +1439,10 @@ void* reader_thread(void *ptr)
 
     printf("reader_thread %d: connection closed\n", __LINE__);
     close(server_socket);
+    close(udp_write);
     server_socket = -1;
+    udp_write = -1;
+    
 
 // signal the poser to finish
     frame_input->done = 1;
@@ -1419,12 +1502,11 @@ void do_server()
 	struct sockaddr_in addr;
 	if((socket_fd = socket(PF_INET, SOCK_STREAM, 0)) < 0)
 	{
-		printf("do_server %d: socket failed\n", __LINE__);
+		printf("do_server %d: TCP socket failed\n", __LINE__);
 		return;
 	}
 
     int got_it = 0;
-    int port;
     for(port = PORT1; port < PORT2; port++)
     {
 	    addr.sin_family = AF_INET;
@@ -1433,8 +1515,25 @@ void do_server()
 
 	    if(bind(socket_fd, (struct sockaddr*)&addr, sizeof(addr)) >= 0)
 	    {
-            got_it = 1;
-            break;
+        
+            udp_read = socket(PF_INET, SOCK_DGRAM, 0);
+	        struct sockaddr_in udp_addr;
+	        udp_addr.sin_family = AF_INET;
+	        udp_addr.sin_port = htons((unsigned short)port + 1);
+	        udp_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+	        if(bind(udp_read, 
+		        (struct sockaddr*)&udp_addr, 
+		        sizeof(udp_addr)) >= 0)
+	        {
+                got_it = 1;
+                break;
+	        }
+            else
+            {
+                printf("do_server %d: UDP socket failed\n", __LINE__);
+                close(udp_read);
+            }
 	    }
     }
     
@@ -1463,8 +1562,29 @@ void do_server()
 			return;
 		}
         
+        udp_write = socket(PF_INET, SOCK_DGRAM, 0);
+	    udp_write_addr.sin_family = AF_INET;
+	    udp_write_addr.sin_port = htons((unsigned short)port + 1);
+//	    udp_write_addr.sin_addr = clientname.sin_addr;
+
+        struct hostent *hostinfo;
+// wifi is IP masqueraded behind the router
+//        hostinfo = gethostbyname("10.0.2.103");
+        hostinfo = gethostbyname("10.0.2.104");
+	    udp_write_addr.sin_addr = *(struct in_addr *)hostinfo->h_addr;
 
 
+printf("do_server %d: clientname=%s\n", __LINE__, inet_ntoa(udp_write_addr.sin_addr));
+
+
+// 	    if(connect(udp_write, 
+// 		    (struct sockaddr*)&udp_write_addr, 
+// 		    sizeof(udp_write_addr)) < 0)
+// 	    {
+// 			printf("do_server %d: connect udp_write failed\n", __LINE__);
+// 			return;
+// 	    }
+//             
 
 
         do_server_connection();
@@ -1482,16 +1602,18 @@ int main(int argc, char *argv[])
 {
 #ifdef LOAD_COORDS
     do_debug_file();
-#endif // LOAD_COORDS
+#else // LOAD_COORDS
 
-#ifdef DO_TEST_PHOTOS
-    do_poser();
-#endif // DO_TEST_PHOTOS
-    
-#if defined(DO_SERVER) && !defined(DO_TEST_PHOTOS)
-    do_server();
-#endif // DO_SERVER
-    
+    #ifdef READ_INPUT
+        frame_output = std::make_shared<Process>();
+        do_poser();
+    #else // READ_INPUT
+
+        #if defined(DO_SERVER)
+            do_server();
+        #endif // DO_SERVER
+    #endif // !READ_INPUT
+#endif // !LOAD_COORDS
     return 0;
 }
 
