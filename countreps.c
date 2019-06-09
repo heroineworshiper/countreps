@@ -1044,6 +1044,78 @@ void do_poser()
         false); // const bool workerOnNewThread
 #endif // DO_SERVER
 
+// get input from the webcam
+#if !defined(DO_SERVER) && !defined(SERVER_READFILES) && !defined(READ_INPUT)
+    op::ProducerType producerType;
+    std::string producerString;
+    std::tie(producerType, producerString) = op::flagsToProducer(
+        "", // FLAGS_image_dir
+        "", // FLAGS_video
+        "", // FLAGS_ip_camera
+        -1, // FLAGS_camera
+        false, // FLAGS_flir_camera
+        -1); // FLAGS_flir_camera_index
+
+    const auto cameraSize = op::flagsToPoint(
+        "-1x-1", // FLAGS_camera_resolution
+        "-1x-1");
+    const op::WrapperStructInput wrapperStructInput
+    {
+        producerType, 
+        producerString, 
+        0, // FLAGS_frame_first, 
+        1, // FLAGS_frame_step, 
+        (unsigned long long)-1, // FLAGS_frame_last,
+        false, // FLAGS_process_real_time, 
+        false, // FLAGS_frame_flip, 
+        0, // FLAGS_frame_rotate, 
+        false, // FLAGS_frames_repeat,
+        cameraSize, 
+        "", // FLAGS_camera_parameter_path, 
+        false, // FLAGS_frame_undistort, 
+        -1, // FLAGS_3d_views
+    };
+    opWrapper.configure(wrapperStructInput);
+
+#endif // !DO_SERVER
+
+// Get frames from test_input
+#if defined(SERVER_READFILES) || defined(READ_INPUT)
+    op::ProducerType producerType;
+    std::string producerString;
+    std::tie(producerType, producerString) = op::flagsToProducer(
+        INPATH, // FLAGS_image_dir
+        "", // FLAGS_video
+        "", // FLAGS_ip_camera
+        -1, // FLAGS_camera
+        false, // FLAGS_flir_camera
+        -1); // FLAGS_flir_camera_index
+    const auto cameraSize = op::flagsToPoint("-1x-1", "-1x-1");
+
+
+
+    const op::WrapperStructInput wrapperStructInput
+    {
+        producerType, 
+        producerString, 
+        0, // FLAGS_frame_first
+        1, // FLAGS_frame_step
+        (unsigned long long)-1, // FLAGS_frame_last
+        false, // FLAGS_process_real_time
+        false, // FLAGS_frame_flip
+        0, // FLAGS_frame_rotate
+        false, // FLAGS_frames_repeat
+        cameraSize, 
+        "models/cameraParameters/flir/", // FLAGS_camera_parameter_path
+        false, // FLAGS_frame_undistort
+        -1, // FLAGS_3d_views
+    };
+    opWrapper.configure(wrapperStructInput);
+    
+#endif // SERVER_READFILES || READ_INPUT
+
+
+
 // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
     const auto netInputSize = op::flagsToPoint("-1x160", "-1x160");
 //    const auto netInputSize = op::flagsToPoint("-1x256", "-1x256");
@@ -1129,41 +1201,6 @@ void do_poser()
     opWrapper.configure(wrapperStructExtra);
 
 
-// Get frames from test_input
-#if !defined(DO_SERVER) || defined(SERVER_READFILES) || defined(READ_INPUT)
-    op::ProducerType producerType;
-    std::string producerString;
-    std::tie(producerType, producerString) = op::flagsToProducer(
-        INPATH, // FLAGS_image_dir
-        "", // FLAGS_video
-        "", // FLAGS_ip_camera
-        -1, // FLAGS_camera
-        false, // FLAGS_flir_camera
-        -1); // FLAGS_flir_camera_index
-    const auto cameraSize = op::flagsToPoint("-1x-1", "-1x-1");
-
-
-
-    const op::WrapperStructInput wrapperStructInput
-    {
-        producerType, 
-        producerString, 
-        0, // FLAGS_frame_first
-        1, // FLAGS_frame_step
-        (unsigned long long)-1, // FLAGS_frame_last
-        false, // FLAGS_process_real_time
-        false, // FLAGS_frame_flip
-        0, // FLAGS_frame_rotate
-        false, // FLAGS_frames_repeat
-        cameraSize, 
-        "models/cameraParameters/flir/", // FLAGS_camera_parameter_path
-        false, // FLAGS_frame_undistort
-        -1, // FLAGS_3d_views
-    };
-    opWrapper.configure(wrapperStructInput);
-    
-#endif //!DO_SERVER || SERVER_READFILES
-
 
 
 #if defined(SAVE_OUTPUT) || defined(READ_INPUT)
@@ -1206,7 +1243,7 @@ void do_poser()
         op::flagsToDisplayMode(0, false), 
 #endif // !USE_GUI
         true, 
-        false, // FLAGS_fullscreen
+        false, // FLAGS_fullscreen.  Doesn't work.
     };
     opWrapper.configure(wrapperStructGui);
 
@@ -1291,6 +1328,8 @@ void do_debug_file()
     exit(0);
 }
 
+
+#ifdef DO_SERVER
 
 unsigned char reader_frame[BUFFER];
 unsigned char reader_buffer[BUFFER];
@@ -1596,6 +1635,8 @@ printf("do_server %d: clientname=%s\n", __LINE__, inet_ntoa(udp_write_addr.sin_a
     }
 }
 
+#endif // DO_SERVER
+
 
 
 int main(int argc, char *argv[])
@@ -1604,7 +1645,7 @@ int main(int argc, char *argv[])
     do_debug_file();
 #else // LOAD_COORDS
 
-    #ifdef READ_INPUT
+    #if defined(READ_INPUT) || defined(USE_GUI)
         frame_output = std::make_shared<Process>();
         do_poser();
     #else // READ_INPUT
