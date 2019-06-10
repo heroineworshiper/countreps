@@ -61,6 +61,9 @@
 #include <semaphore.h>
 #endif
 
+
+#include "gui.h"
+
 // test photos go here
 #define INPATH "test_input"
 // output photos go here
@@ -81,7 +84,7 @@
 #define SAVE_COORDS
 
 // start a server & wait for connections from the tablet
-#define DO_SERVER
+//#define DO_SERVER
     #define PORT1 1234
     #define PORT2 1235
     #define BUFFER 0x100000
@@ -109,8 +112,6 @@
 
 // reps must be separated by this many frames
 #define DEBOUNCE 4
-// minimum ms between frames
-#define MINIMUM_PERIOD 150
 
 // the body parts as defined in 
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -153,7 +154,7 @@
 
 #define TORAD(x) ((float)(x) * 2 * M_PI / 360)
 #define TODEG(x) ((float)(x) * 360 / M_PI / 2)
-
+;
 typedef struct
 {
     float x;
@@ -230,7 +231,7 @@ void unlock_sema(void *ptr)
 #endif
 }
 
-class FrameInput : public op::WorkerProducer<std::shared_ptr<std::vector<op::Datum>>>
+class FrameInput : public op::WorkerProducer<std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>>
 {
 public:
     int done = 0;
@@ -283,7 +284,7 @@ public:
 
     void initializationOnThread() {}
 
-    std::shared_ptr<std::vector<op::Datum>> workProducer()
+    std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>> workProducer()
     {
         while(1)
         {
@@ -308,9 +309,10 @@ public:
                 have_frame = 0;
                 
                 // Create new datum
-                auto datumsPtr = std::make_shared<std::vector<op::Datum>>();
+                auto datumsPtr = std::make_shared<std::vector<std::shared_ptr<op::Datum>>>();
                 datumsPtr->emplace_back();
-                auto& datum = datumsPtr->at(0);
+                auto& datumPtr = datumsPtr->at(0);
+                datumPtr = std::make_shared<op::Datum>();
 
 #if defined(SAVE_INPUT) && !defined(SERVER_READFILES)
                 char string[TEXTLEN];
@@ -335,7 +337,7 @@ public:
 
                 // Fill datum
                 cv::Mat rawData(1, frame_size, CV_8UC1, (void*)buffer);
-                datum.cvInputData = imdecode(rawData, cv::IMREAD_COLOR);
+                datumPtr->cvInputData = imdecode(rawData, cv::IMREAD_COLOR);
 
                 pthread_mutex_unlock(&frame_lock);
                 unlock_sema(&frame_processed_sema);
@@ -358,7 +360,7 @@ public:
 
 
 
-class Process : public op::WorkerConsumer<std::shared_ptr<std::vector<op::Datum>>>
+class Process : public op::WorkerConsumer<std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>>
 {
 public:
 // the reps detected
@@ -392,20 +394,23 @@ public:
     void initializationOnThread() {}
 
 // get raw data from openpose
-    void workConsumer(const std::shared_ptr<std::vector<op::Datum>>& datumsPtr)
+    void workConsumer(const std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>& datumsPtr)
     {
         if (datumsPtr != nullptr && !datumsPtr->empty())
         { 
             
             
-            const auto& poseKeypoints = datumsPtr->at(0).poseKeypoints;
-            const auto& image = datumsPtr->at(0).cvOutputData;
+            const auto& poseKeypoints = datumsPtr->at(0)->poseKeypoints;
+            const auto& image = datumsPtr->at(0)->cvOutputData;
             coord_t output[BODY_PARTS];
             
-            printf("Process::workConsumer %d frame=%d lions=%d\n", 
+            printf("Process::workConsumer %d frame=%d lions=%d w=%d h=%d channels=%d\n", 
                 __LINE__, 
                 frames,
-                poseKeypoints.getSize(0));
+                poseKeypoints.getSize(0),
+                image.cols,
+                image.rows,
+                image.channels());
             bzero(output, sizeof(output));
             for (auto lion = 0 ; lion < poseKeypoints.getSize(0) ; lion++)
             {
@@ -434,6 +439,19 @@ public:
             }
 
 
+// show the previous exercise reps if on the 1st rep of the next exercise
+            int reps2 = reps;
+            if(reps == 0 && plan_line > 0)
+            {
+                reps2 = plan[plan_line - 1].reps;
+            }
+
+// show the output frame on the GUI
+            update_gui((unsigned char*)image.ptr(0), 
+                image.cols, 
+                image.rows,
+                reps2,
+                exercise);
 
 #if defined(DO_SERVER) && !defined(READ_INPUT)
             if(server_socket < 0)
@@ -454,13 +472,6 @@ public:
                     return_packet[return_size + 1] = 0x54;
                     return_packet[return_size + 2] = 0x63;
                     return_packet[return_size + 3] = 0xd2;
-
-// show the previous exercise reps if on the 1st rep of the next exercise
-                    int reps2 = reps;
-                    if(reps == 0 && plan_line > 0)
-                    {
-                        reps2 = plan[plan_line - 1].reps;
-                    }
                     return_packet[return_size + 4] = reps2;
                     return_packet[return_size + 5] = exercise;
 
@@ -1117,9 +1128,9 @@ void do_poser()
 
 
 // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
-    const auto netInputSize = op::flagsToPoint("-1x160", "-1x160");
+//    const auto netInputSize = op::flagsToPoint("-1x160", "-1x160");
 //    const auto netInputSize = op::flagsToPoint("-1x256", "-1x256");
-//    const auto netInputSize = op::flagsToPoint("-1x368", "-1x368");
+    const auto netInputSize = op::flagsToPoint("-1x368", "-1x368");
     const auto outputSize = op::flagsToPoint("-1x-1", "-1x-1");
     const auto keypointScale = op::flagsToScaleMode(0);
     const auto multipleView = false;
@@ -1130,10 +1141,10 @@ void do_poser()
 
     const op::WrapperStructPose wrapperStructPose
     {
-        true, // !FLAGS_body_disable
+        op::PoseMode::Enabled, // PoseMode
         netInputSize, // netInputSize
         outputSize, 
-        keypointScale, 
+        keypointScale, // keypointScaleMode
         -1, // FLAGS_num_gpu
         0, // FLAGS_num_gpu_start
         1, // scale_number
@@ -1152,6 +1163,9 @@ void do_poser()
         1, // FLAGS_number_people_max
         false, // FLAGS_maximize_positives
         -1, // FLAGS_fps_max
+        "", // FLAGS_prototxt_path
+        "", // FLAGS_caffemodel_path
+        (float)0, // (float)FLAGS_upsampling_ratio
         enableGoogleLogging
     };
     opWrapper.configure(wrapperStructPose);
@@ -1160,33 +1174,35 @@ void do_poser()
 // Face configuration (use op::WrapperStructFace{} to disable it)
     const auto faceNetInputSize = op::flagsToPoint("368x368", "368x368 (multiples of 16)");
         
-    const op::WrapperStructFace wrapperStructFace
-    {
-        false, // FLAGS_face
-        faceNetInputSize, 
-        op::flagsToRenderMode(-1, multipleView, -1),
-        (float)0.6, // FLAGS_face_alpha_pose
-        (float)0.7, // FLAGS_face_alpha_heatmap
-        (float)0.4, // FLAGS_face_render_threshold
-    };
+//     const op::WrapperStructFace wrapperStructFace
+//     {
+//         false, // FLAGS_face
+//         faceNetInputSize, 
+//         op::flagsToRenderMode(-1, multipleView, -1),
+//         (float)0.6, // FLAGS_face_alpha_pose
+//         (float)0.7, // FLAGS_face_alpha_heatmap
+//         (float)0.4, // FLAGS_face_render_threshold
+//     };
+    const op::WrapperStructFace wrapperStructFace{};
     opWrapper.configure(wrapperStructFace);
 
 
 // Hand configuration (use op::WrapperStructHand{} to disable it)
     const auto handNetInputSize = op::flagsToPoint("368x368", "368x368 (multiples of 16)");
     
-    const op::WrapperStructHand wrapperStructHand
-    {
-        false, // FLAGS_hand
-        handNetInputSize, 
-        1, // FLAGS_hand_scale_number
-        (float)0.4, // FLAGS_hand_scale_range 
-        false, // FLAGS_hand_tracking
-        op::flagsToRenderMode(-1, multipleView, -1), 
-        (float)0.6, // FLAGS_hand_alpha_pose
-        (float)0.7, // FLAGS_hand_alpha_heatmap
-        (float)0.2, // FLAGS_hand_render_threshold
-    };
+//     const op::WrapperStructHand wrapperStructHand
+//     {
+//         false, // FLAGS_hand
+//         handNetInputSize, 
+//         1, // FLAGS_hand_scale_number
+//         (float)0.4, // FLAGS_hand_scale_range 
+//         false, // FLAGS_hand_tracking
+//         op::flagsToRenderMode(-1, multipleView, -1), 
+//         (float)0.6, // FLAGS_hand_alpha_pose
+//         (float)0.7, // FLAGS_hand_alpha_heatmap
+//         (float)0.2, // FLAGS_hand_render_threshold
+//     };
+    const op::WrapperStructHand wrapperStructHand{};
     opWrapper.configure(wrapperStructHand);
 
 // Extra functionality configuration (use op::WrapperStructExtra{} to disable it)
@@ -1209,15 +1225,16 @@ void do_poser()
     {
         -1.f, // FLAGS_cli_verbose
         "", // FLAGS_write_keypoint
-        op::stringToDataFormat("yml"),
+        op::stringToDataFormat("yml"), // FLAGS_write_keypoint_format
         "", // FLAGS_write_json
         "", // FLAGS_write_coco_json
-        "", // FLAGS_write_coco_foot_json
+        1, // FLAGS_write_coco_json_variants
         0, // FLAGS_write_coco_json_variant
         OUTPATH, // FLAGS_write_images
         "jpg", // FLAGS_write_images_format
         "", // FLAGS_write_video
         -1., // FLAGS_write_video_fps
+        false, // FLAGS_write_video_with_audio
         "", // FLAGS_write_heatmaps
         "png", // FLAGS_write_heatmaps_format
         "", // FLAGS_write_video_3d
@@ -1641,19 +1658,14 @@ printf("do_server %d: clientname=%s\n", __LINE__, inet_ntoa(udp_write_addr.sin_a
 
 int main(int argc, char *argv[])
 {
+    init_gui();
+
 #ifdef LOAD_COORDS
     do_debug_file();
 #else // LOAD_COORDS
 
-    #if defined(READ_INPUT) || defined(USE_GUI)
-        frame_output = std::make_shared<Process>();
-        do_poser();
-    #else // READ_INPUT
-
-        #if defined(DO_SERVER)
-            do_server();
-        #endif // DO_SERVER
-    #endif // !READ_INPUT
+    frame_output = std::make_shared<Process>();
+    do_poser();
 #endif // !LOAD_COORDS
     return 0;
 }

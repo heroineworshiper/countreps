@@ -1,6 +1,8 @@
 UNAME := $(shell uname)
+ARCH := $(shell arch)
 
 ifeq ($(UNAME), Darwin)
+# Mac
 
 CFLAGS := \
 	-std=c++11 \
@@ -13,26 +15,44 @@ CFLAGS := \
 CC := clang++
 
 
-else
-
+else # Mac
+# Linux
 
 
 
 OPENPOSE_DIR := /root/openpose
 OPENCV_DIR := /root/opencv-3.4.3/build
-OTHER_DIR := /root/colorize/include
+GUI_DIR := /root/hvirtual/guicast
+
 CFLAGS := \
-	-std=c++11 \
+	-g \
+        -O2 \
+        -std=c++11 \
 	-I$(OPENPOSE_DIR)/include \
 	-I$(OPENCV_DIR)/include \
-        -I$(OTHER_DIR) \
+        -I$(GUI_DIR) \
+        -I/usr/include/freetype2
+
+LFLAGS := \
         -L$(OPENCV_DIR)/lib \
         -L`pwd`/lib \
+        -L$(OPENPOSE_DIR)/build/src/openpose/ \
         -lopenpose \
         `PKG_CONFIG_PATH=$(OPENCV_DIR)/lib/pkgconfig/ pkg-config opencv --libs` \
-	-lpthread
+	-lpthread \
+        $(GUI_DIR)/$(ARCH)/libguicast.a \
+        -lX11 \
+        -lXext \
+        -lXft \
+        -lXv \
+        -lpng \
+        -lfreetype
+        
 CC := g++
-endif
+
+
+
+endif  # Linux
 
 
 
@@ -45,8 +65,17 @@ AVR_DUDE := avrdude -v -patmega328p -cstk500v1 -P/dev/ttyACM0 -b19200
 AVR_CFLAGS := -O2 -mmcu=atmega328p
 AVR_LFLAGS := -O2 -mmcu=atmega328p -Wl,--section-start=.text=0x0000 -nostdlib
 
-all: countreps.c
-	$(CC) -O2 -o countreps countreps.c $(CFLAGS)
+
+OBJS := \
+	countreps.o \
+	gui.o 
+
+countreps: $(OBJS)
+	$(CC) -o countreps $(OBJS) $(LFLAGS)
+
+$(OBJS):
+	$(CC) $(CFLAGS) -c $< -o $*.o
+
 
 test: test.c
 	gcc -o test test.c
@@ -69,6 +98,12 @@ servos_fuse:
 	$(AVR_DUDE) -Ulock:w:0x3F:m -Uhfuse:w:0xDA:m
 	$(AVR_DUDE) -Ulock:w:0x3F:m -Uefuse:w:0x05:m
 
+
+clean:
+	rm -f countreps *.o
+
+countreps.o: countreps.c
+gui.o: gui.c
 
 
 
