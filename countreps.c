@@ -496,6 +496,11 @@ public:
 #endif // DO_SERVER
             
             frames++;
+// DEBUG
+// if(frames >= 30)
+// {
+// finish_gui();
+// }
         }
     }
 
@@ -583,7 +588,6 @@ public:
                 {
                     printf("Process.process2 %d: done\n", __LINE__);
                     finish_gui();
-                    exit(0);
                 }
             }
         }

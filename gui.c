@@ -14,11 +14,15 @@
 
 // begin situps<break/>begin pushups<break/>begin hip flexes<break/>begin squats<break/>
 // welcome to rep counter
+// the program has finished
 
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include "condition.h"
 #include "guicast.h"
+#include "keys.h"
+#include "mutex.h"
 
 #define W 1920
 #define H 1040
@@ -67,7 +71,7 @@ public:
                 sprintf(string, "aplay %s", blurb);
                 int _ = system(string);
                 
-                feee(blurb);
+                free(blurb);
             }
             else
             {
@@ -76,7 +80,7 @@ public:
         }
     }
     
-    void play_sound(char *path)
+    void play_sound(const char *path)
     {
         char *text = strdup(path);
         blurb_lock.lock();
@@ -90,7 +94,7 @@ public:
     Condition blurb_wait;
     Mutex blurb_lock;
     int done;
-}
+};
 
 class GUI : public BC_Window
 {
@@ -117,6 +121,7 @@ public:
     
     int keypress_event()
     {
+        //printf("GUI::keypress_event %d %c\n", __LINE__, get_keypress());
         switch(get_keypress())
         {
             case ESC:
@@ -130,14 +135,7 @@ public:
     
 };
 
-
 GUI *gui;
-GUIThread thread;
-SoundThread sound;
-BC_Bitmap *bitmap = 0;
-FT_Library freetype_library = 0;
-FT_Face freetype_face = 0;
-
 class GUIThread : public Thread
 {
 public:
@@ -148,8 +146,16 @@ public:
     void run()
     {
         gui->run_window();
+        exit(0);
     }
 };
+
+
+GUIThread thread;
+SoundThread sound;
+BC_Bitmap *bitmap = 0;
+FT_Library freetype_library = 0;
+FT_Face freetype_face = 0;
 
 
 int load_freetype_face(FT_Library &freetype_library,
@@ -394,7 +400,7 @@ void update_gui(unsigned char *src,
 
     draw_text(TEXT_X, H * 3 / 4, LITTLETEXT, exercise_to_text[exercise]);
 
-
+    gui->lock_window();
     gui->draw_bitmap(bitmap, 
 	    1,
 	    0, 
@@ -407,14 +413,18 @@ void update_gui(unsigned char *src,
 	    H);
     
     gui->flash();
+    gui->unlock_window();
 }
 
+// called outside the GUIThread
 void finish_gui()
 {
     sound.done = 1;
     sound.play_sound("done.wav");
     sound.join();
+    gui->lock_window();
     gui->set_done(0);
+    gui->unlock_window();
 }
 
 
