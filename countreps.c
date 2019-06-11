@@ -557,7 +557,7 @@ public:
 
         calculate_reps();
 
-        
+
         if(reps != prev_reps)
         {
             printf("Process.process2 %d: exercise=%d reps=%d\n", 
@@ -567,16 +567,23 @@ public:
             prev_reps = reps;
 
 // reset the counter
-            if(plan_line < TOTAL_PLANS - 1)
+            if(reps >= plan[plan_line].reps)
             {
-                if(reps >= plan[plan_line].reps)
+                if(plan_line < TOTAL_PLANS - 1)
                 {
                     reps = 0;
                     prev_reps = 0;
                     prev_pose = UNKNOWN_POSE;
+
                     plan_line++;
                     exercise = plan[plan_line].exercise;
                     printf("Process.process2 %d: next exercise %d\n", __LINE__, exercise);
+                }
+                else
+                {
+                    printf("Process.process2 %d: done\n", __LINE__);
+                    finish_gui();
+                    exit(0);
                 }
             }
         }

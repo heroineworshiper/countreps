@@ -10,7 +10,7 @@ void update_gui(unsigned char *src,
     int reps, 
     int exercise);
 
-
+void finish_gui();
 
 #endif
 

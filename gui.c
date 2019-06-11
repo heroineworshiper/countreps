@@ -5,13 +5,13 @@
 // select Katie, enable ssml
 // paste blocks of text until the counter fills up
 
-// 0<break/>
-// 1<break/> 2 <break/>3 <break/>4 <break/>5 <break/>6 <break/>7 <break/>8 
+// 0<break/> 1<break/> 2 <break/>3 <break/>4 <break/>5 <break/>6 <break/>7 <break/>8 
 // <break/>9 <break/>10 <break/>11 <break/>12 <break/>13 <break/>14 <break/>15 
-// <break/>16 <break/>17 <break/>18 <break/>19 <break/>20 
-// <break/>21 <break/>22 
+
+// <break/>16 <break/>17 <break/>18 <break/>19 <break/>20 <break/>21 <break/>22 
 // <break/>23 <break/>24 <break/>25 <break/>26 <break/>27 <break/>28 <break/>29 
 // <break/>30 <break/>31 <break/>32 <break/>33
+
 // begin situps<break/>begin pushups<break/>begin hip flexes<break/>begin squats<break/>
 // welcome to rep counter
 
@@ -41,6 +41,57 @@ const char *exercise_to_text[] =
 int prev_reps = -1;
 int prev_exercise = -1;
 
+  
+class SoundThread : public Thread
+{
+public:
+    SoundThread() : Thread(1)
+    {
+        done = 0;
+    }
+    
+    void run()
+    {
+        while(!done)
+        {
+            blurb_wait.lock();
+            
+            blurb_lock.lock();
+            if(blurbs.size() > 0)
+            {
+                char *blurb = blurbs.get(0);
+                blurbs.remove_number(0);
+                blurb_lock.unlock();
+                
+                char string[BCTEXTLEN];
+                sprintf(string, "aplay %s", blurb);
+                int _ = system(string);
+                
+                feee(blurb);
+            }
+            else
+            {
+                blurb_lock.unlock();
+            }
+        }
+    }
+    
+    void play_sound(char *path)
+    {
+        char *text = strdup(path);
+        blurb_lock.lock();
+        blurbs.append(text);
+        blurb_lock.unlock();
+        blurb_wait.unlock();
+    }
+    
+    
+    ArrayList<char*> blurbs;
+    Condition blurb_wait;
+    Mutex blurb_lock;
+    int done;
+}
+
 class GUI : public BC_Window
 {
 public:
@@ -64,12 +115,41 @@ public:
 		return 1;
 	};
     
+    int keypress_event()
+    {
+        switch(get_keypress())
+        {
+            case ESC:
+            case 'q':
+                set_done(0);
+                return 1;
+                break;
+        }
+        return 0;
+    }
+    
 };
 
+
 GUI *gui;
+GUIThread thread;
+SoundThread sound;
 BC_Bitmap *bitmap = 0;
 FT_Library freetype_library = 0;
 FT_Face freetype_face = 0;
+
+class GUIThread : public Thread
+{
+public:
+    GUIThread() : Thread()
+    {
+    }
+
+    void run()
+    {
+        gui->run_window();
+    }
+};
 
 
 int load_freetype_face(FT_Library &freetype_library,
@@ -96,16 +176,10 @@ int load_freetype_face(FT_Library &freetype_library,
 
 }
 
-void play_sound(const char *path)
-{
-    char string[BCTEXTLEN];
-    sprintf(string, "aplay %s", path);
-    int _ = system(string);
-}
 
 void say_intro()
 {
-    play_sound("welcome.wav");
+    sound.play_sound("welcome.wav");
 }
 
 void say_reps(int number)
@@ -148,7 +222,7 @@ void say_reps(int number)
         "33.wav"
     };
     
-    play_sound(paths[number]);
+    sound.play_sound(paths[number]);
 }
 
 void say_exercise(int exercise)
@@ -160,11 +234,13 @@ void say_exercise(int exercise)
         "hips.wav",
         "squats.wav"
     };
-    play_sound(paths[exercise]);
+    sound.play_sound(paths[exercise]);
 }
 
 void init_gui()
 {
+    sound.start();
+    
     FT_Init_FreeType(&freetype_library);
     load_freetype_face(freetype_library,
 		freetype_face,
@@ -181,6 +257,7 @@ void init_gui()
     gui->show_window();
     say_intro();
 
+    thread.start();
 }
 
 
@@ -332,7 +409,13 @@ void update_gui(unsigned char *src,
     gui->flash();
 }
 
-
+void finish_gui()
+{
+    sound.done = 1;
+    sound.play_sound("done.wav");
+    sound.join();
+    gui->set_done(0);
+}
 
 
 
