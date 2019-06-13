@@ -384,6 +384,7 @@ public:
 // packet to send back to the tablet at the right time
     uint8_t return_packet[BUFFER];
     int return_size = 0;
+    int done = 0;
 
 
     ~Process()
@@ -452,6 +453,14 @@ public:
                 image.rows,
                 reps2,
                 exercise);
+
+
+            if(done)
+            {
+                finish_gui();
+            }
+
+
 
 #if defined(DO_SERVER) && !defined(READ_INPUT)
             if(server_socket < 0)
@@ -587,7 +596,7 @@ public:
                 else
                 {
                     printf("Process.process2 %d: done\n", __LINE__);
-                    finish_gui();
+                    done = 1;
                 }
             }
         }

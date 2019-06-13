@@ -51,12 +51,11 @@ class SoundThread : public Thread
 public:
     SoundThread() : Thread(1)
     {
-        done = 0;
     }
     
     void run()
     {
-        while(!done)
+        while(1)
         {
             blurb_wait.lock();
             
@@ -66,6 +65,11 @@ public:
                 char *blurb = blurbs.get(0);
                 blurbs.remove_number(0);
                 blurb_lock.unlock();
+                
+                if(!blurb)
+                {
+                    break;
+                }
                 
                 char string[BCTEXTLEN];
                 sprintf(string, "aplay %s", blurb);
@@ -93,7 +97,6 @@ public:
     ArrayList<char*> blurbs;
     Condition blurb_wait;
     Mutex blurb_lock;
-    int done;
 };
 
 class GUI : public BC_Window
@@ -419,8 +422,8 @@ void update_gui(unsigned char *src,
 // called outside the GUIThread
 void finish_gui()
 {
-    sound.done = 1;
     sound.play_sound("done.wav");
+    sound.play_sound(0);
     sound.join();
     gui->lock_window();
     gui->set_done(0);
