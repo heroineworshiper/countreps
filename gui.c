@@ -86,7 +86,12 @@ public:
     
     void play_sound(const char *path)
     {
-        char *text = strdup(path);
+        char *text = 0;
+        
+        if(path)
+        {
+            text = strdup(path);
+        }
         blurb_lock.lock();
         blurbs.append(text);
         blurb_lock.unlock();
