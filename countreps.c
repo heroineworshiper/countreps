@@ -1149,8 +1149,10 @@ void do_poser()
 
 // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
 //    const auto netInputSize = op::flagsToPoint("-1x160", "-1x160");
-//    const auto netInputSize = op::flagsToPoint("-1x256", "-1x256");
-    const auto netInputSize = op::flagsToPoint("-1x368", "-1x368");
+// 
+// Junk laptop GTX 970M
+    const auto netInputSize = op::flagsToPoint("-1x256", "-1x256");
+//    const auto netInputSize = op::flagsToPoint("-1x368", "-1x368");
     const auto outputSize = op::flagsToPoint("-1x-1", "-1x-1");
     const auto keypointScale = op::flagsToScaleMode(0);
     const auto multipleView = false;
