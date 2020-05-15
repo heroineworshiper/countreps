@@ -2,6 +2,16 @@ What you'll find here:
 countreps: rep counter using machine vision
 tracker: camera tracker using machine vision
 
+Compiling countreps is a matter of
+
+make countreps
+
+Compiling tracker is a matter of
+
+make tracker
+make servos
+
+servos runs on an atmega & must be programmed with instructions in servos.c
 
 
 
@@ -156,6 +166,7 @@ Input frames are in test_input.  Output frames are put in test_output.
 Using the CPU, it does 640x480 at 2.15 seconds per frame.
 
 Using CUDA on the GeForce GTX 1050, it's 14 frames per second.
+On the GTX 970M, it's 13 fps.
 CUDA in 2GB of RAM requires reducing netInputSize to -1x256.
 
 

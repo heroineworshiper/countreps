@@ -97,7 +97,7 @@
     // save openpose output in test_output
     #define SAVE_OUTPUT
 
-// show a window on the screen
+// use openpose instead of guicast to show a window on the screen
 //#define USE_GUI
 
 

@@ -81,7 +81,7 @@ test: test.c
 	gcc -o test test.c
 
 tracker: tracker.c
-	$(CC) -O2 -o tracker tracker.c $(CFLAGS)
+	$(CC) -O2 -o tracker tracker.c $(CFLAGS) $(LFLAGS)
 
 
 # compile servos
