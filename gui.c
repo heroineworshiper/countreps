@@ -262,6 +262,7 @@ void init_gui()
 
     
     gui = new GUI();
+    gui->start_video();
     bitmap = new BC_Bitmap(gui, 
 	    W,
 	    H,
@@ -419,8 +420,6 @@ void update_gui(unsigned char *src,
 	    0,
 	    W,
 	    H);
-    
-    gui->flash();
     gui->unlock_window();
 }
 

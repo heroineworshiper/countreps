@@ -18,9 +18,10 @@
  * 
  */
 
-// this runs on a macbook to do the machine vision
+// this runs on a laptop to do the machine vision
+
 // be sure to install the FTDI driver for Macos, 
-// make sure the virtual machine isn't bound to it.
+// make sure the virtual machine isn't bound to it & 
 // the right webcam is being selected
 
 // To build it:
@@ -54,54 +55,42 @@
 #include <semaphore.h>
 #include <signal.h>
 
+#include "guicast.h"
+#include "keys.h"
+#include "mutex.h"
+
 // load frames from test_input
 //#define LOAD_TEST_INPUT
-// load frames from EOS RP
-//#define LOAD_GPHOTO2
+// load frames from DSLR
+#define LOAD_GPHOTO2
 // use a webcam as input
-#define LOAD_WEBCAM
+//#define LOAD_WEBCAM
 
 // save openpose output in test_output
 #define SAVE_OUTPUT
 // output photos go here
 #define OUTPATH "test_output"
 
+// tilt tracking is optional
+#define TRACK_TILT
+
 // maximum humans to track
-#define MAX_HUMANS 2
+#define MAX_HUMANS 1
 
 // PWM limits
 #define MIN_PWM 1000
 #define MAX_PWM 32700
 
-// tilt moves down for lower numbers
-// with DSLR
-#ifdef LOAD_GPHOTO2
-float pan = 24976;
-float tilt = 16976;
-//#define TILT_MIN 14976
-//#define TILT_MAX 30676
-#define TILT_MAG 7850
-#endif
+static float pan = 18676;
+static float tilt = 21076;
+static float start_pan = pan;
+static float start_tilt = tilt;
+static int pan_sign = 1;
+static int tilt_sign = 1;
 
-#ifdef LOAD_WEBCAM
-// with webcam for testing
-float pan = 24976;
-float tilt = 25776;
-//#define TILT_MIN 24076
-//#define TILT_MAX 28176
-#define TILT_MAG 2050
-#endif
-
-
-float start_pan = pan;
-float start_tilt = tilt;
-int pan_sign = 1;
-int tilt_sign = 1;
-
-// pan moves right for lower numbers
-//#define PAN_MIN 18676
-//#define PAN_MAX 29176
-#define PAN_MAG 5250
+// PWM limits beyond starting point for tracking
+#define TILT_MAG 1500
+#define PAN_MAG 5000
 
 // manual step
 #define PAN_STEP 100
@@ -120,12 +109,18 @@ int tilt_sign = 1;
 #define TO_MS(x) ((x).tv_sec * 1000 + (x).tv_usec / 1000)
 
 // PID gain per second
-#define X_GAIN 2
-#define Y_GAIN 2
+#define X_GAIN 4
+#define Y_GAIN 4
 
-// size of frame to process.  Frame rate depends on aspect ratio.
-//#define PROCESS_W 1280
-//#define PROCESS_H 1280
+// normalize the error pixels to the EOS RP preview frame sizes
+#define NORMALIZE_DISTANCE(error) (error * 576 / height)
+
+// Limit of PWM changes
+#define MAX_TILT_CHANGE 50
+#define MAX_PAN_CHANGE 50
+
+// Search speed when head is above frame
+#define TILT_SEARCH 200
 
 // the body parts as defined in 
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -158,15 +153,11 @@ int tilt_sign = 1;
 
 #define MODEL_WRIST2 4
 #define BODY_PARTS 25
+#define TOTAL_ZONES 4
+#define HEAD_ZONE 0
+#define NECK_ZONE 1
 
-// zone calculations
-#define WANT_MAX 0
-#define WANT_AVG 1
-#define WANT_MIN 2
-
-// body parts comprising the zones
-int head_parts[] = 
-{
+static int zone0[] = {
     MODEL_REYE,
     MODEL_LEYE,
     MODEL_REAR,
@@ -174,23 +165,19 @@ int head_parts[] =
     MODEL_NOSE,
     -1
 };
-
-int body_parts[] = 
-{
+static int zone1[] = {
     MODEL_NECK,
-
     MODEL_LSHOULDER,
     MODEL_RSHOULDER,
-    
+    -1
+};
+static int zone2[] = {
     MODEL_MIDHIP,
     MODEL_RHIP,
     MODEL_LHIP,
-
-    MODEL_LKNEE,
-    MODEL_RKNEE,
-    MODEL_LELBOW,
-    MODEL_RELBOW,
-
+    -1
+};
+static int zone3[] = {
     MODEL_LANKLE,
     MODEL_RANKLE,
     MODEL_RHEEL,
@@ -199,6 +186,9 @@ int body_parts[] =
     MODEL_SMALLTOE,
     -1
 };
+        
+// body parts comprising the zones
+static int *zone_parts[] = { zone0, zone1, zone2, zone3 };
 
 typedef struct
 {
@@ -206,28 +196,34 @@ typedef struct
     int max_y;
 // total body parts detected
     int total;
-// the body parts comprising this measurement
+// the body parts comprising this zone
     int *parts;
 } zone_t;
 
 typedef struct
 {
     int x1, y1, x2, y2;
-    zone_t head;
-    zone_t body;
-} rect_t;
+// last detected size of the head for tilt tracking
+    int head_size;
+    zone_t zones[TOTAL_ZONES];
+} body_t;
 
-rect_t rects[MAX_HUMANS];
-int last_x = -1;
-int last_y = -1;
-int center_x;
-int center_y;
-int width;
-int height;
+static body_t bodies[MAX_HUMANS];
+
+static int servo_fd = -1;
+static int frames = 0;
+
+#define STARTUP 0
+#define CONFIGURING 1
+#define TRACKING 2
+static int current_operation = STARTUP;
+static int have_time1 = 0;
 
 
-int servo_fd = -1;
-int frames = 0;
+#define WINDOW_W 1920
+#define WINDOW_H 1040
+#define MARGIN 10
+
 
 
 int init_serial(const char *path)
@@ -345,6 +341,370 @@ void write_servos(int use_pwm_limits)
 		int temp = write(servo_fd, buffer, BUFFER_SIZE);
 	}
 }
+
+
+
+void load_defaults()
+{
+    char *home = getenv("HOME");
+    char string[TEXTLEN];
+    sprintf(string, "%s/.tracker.rc", home);
+    FILE *fd = fopen(string, "r");
+    
+    if(!fd)
+    {
+        printf("load_defaults %d: Couldn't open %s for reading\n", 
+            __LINE__, 
+            string);
+        return;
+    }
+    
+    while(!feof(fd))
+    {
+        if(!fgets(string, TEXTLEN, fd)) break;
+// get 1st non whitespace character
+        char *key = string;
+        while((*key == ' ' ||
+            *key == '\t' ||
+            *key == '\n') && 
+            *key != 0)
+        {
+            key++;
+        }
+
+// comment or empty
+        if(*key == '#' || *key == 0)
+        {
+            continue;
+        }
+        
+// get start of value
+        char *value = key;
+        while(*value != ' ' && 
+            *value != '\t' && 
+            *value != '\n' && 
+            *value != 0)
+        {
+            value++;
+        }
+
+
+        while((*value == ' ' ||
+            *value == '\t' ||
+            *value == '\n') && 
+            *value != 0)
+        {
+            *value = 0;
+            value++;
+        }
+
+        if(*value == 0)
+        {
+// no value given
+            continue;
+        }
+
+// delete the newline
+        char *end = value;
+        while(*end != '\n' && 
+            *end != 0)
+        {
+            end++;
+        }
+        
+        if(*end == '\n')
+        {
+            *end = 0;
+        }
+        
+        printf("load_defaults %d key='%s' value='%s'\n", __LINE__, key, value);
+        if(!strcasecmp(key, "PAN"))
+        {
+            pan = atof(value);
+        }
+        else
+        if(!strcasecmp(key, "TILT"))
+        {
+            tilt = atof(value);
+        }
+        else
+        if(!strcasecmp(key, "PAN_SIGN"))
+        {
+            pan_sign = atoi(value);
+        }
+        else
+        if(!strcasecmp(key, "TILT_SIGN"))
+        {
+            tilt_sign = atoi(value);
+        }        
+    }
+    
+    fclose(fd);
+}
+
+void save_defaults()
+{
+    char *home = getenv("HOME");
+    char string[TEXTLEN];
+    sprintf(string, "%s/.tracker.rc", home);
+    FILE *fd = fopen(string, "w");
+    
+    if(!fd)
+    {
+        printf("save_defaults %d: Couldn't open %s for writing\n", 
+            __LINE__, 
+            string);
+        return;
+    }
+    
+    fprintf(fd, "PAN %d\n", (int)pan);
+    fprintf(fd, "TILT %d\n", (int)tilt);
+    fprintf(fd, "PAN_SIGN %d\n", pan_sign);
+    fprintf(fd, "TILT_SIGN %d\n", tilt_sign);
+    
+    fclose(fd);
+}
+
+
+
+class GUI : public BC_Window
+{
+public:
+    GUI() : BC_Window("Tracker",
+        0, // x
+		0, // y
+		WINDOW_W, // w
+		WINDOW_H, // h
+		-1, // minw
+		-1, // minh
+		0, // allow_resize
+		0, // private_color
+		1, // hide
+        BLACK) // bg_color
+    {
+    };
+
+	int close_event()
+	{
+		set_done(0);
+		return 1;
+	};
+    
+    int keypress_event()
+    {
+//        printf("GUI::keypress_event %d %c\n", __LINE__, get_keypress());
+        int need_print_servos = 0;
+        int need_write_servos = 0;
+        switch(get_keypress())
+        {
+            case ESC:
+            case 'q':
+                set_done(0);
+                return 1;
+                break;
+            
+            case ' ':
+            case RETURN:
+// advance operation
+                if(current_operation == STARTUP)
+                {
+                    current_operation = CONFIGURING;
+                    clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
+                    int text_h = get_text_height(LARGEFONT, "q0");
+                    int y = text_h + MARGIN;
+                    int x = MARGIN;
+                    set_color(WHITE);
+                    char string[BCTEXTLEN];
+                    sprintf(string,
+                        "Press keys to aim the mount.\n\n"
+                        "PWM Values should be as close to 0 as possible.\n"
+                        "a - left   d - right   w - up   s - down\n"
+                        "t - invert tilt sign   p - invert pan sign\n"
+                        "SPACE or ENTER to save defaults & begin tracking\n"
+                        "ESC to give up & go to a movie.");
+                    draw_text(x, 
+                        y, 
+                        string);
+                    flash(1);
+                    
+// write it a few times to defeat UART initialization glitches
+                    write_servos(1);
+                    usleep(100000);
+                    write_servos(1);
+                    usleep(100000);
+                    write_servos(1);
+                    usleep(100000);
+                    write_servos(1);
+                }
+                else
+                if(current_operation == CONFIGURING)
+                {
+                    start_pan = pan;
+                    start_tilt = tilt;
+                    ::save_defaults();
+                    current_operation = TRACKING;
+                    clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
+                    flash(1);
+                }
+                break;
+            
+            case 'w':
+                tilt += TILT_STEP * tilt_sign;
+                need_write_servos = 1;
+                need_print_servos = 1;
+                break;
+            
+            case 's':
+                tilt -= TILT_STEP * tilt_sign;
+                need_write_servos = 1;
+                need_print_servos = 1;
+                break;
+            
+            case 'a':
+                pan -= PAN_STEP * pan_sign;
+                need_write_servos = 1;
+                need_print_servos = 1;
+                break;
+            
+            case 'd':
+                pan += PAN_STEP * pan_sign;
+                need_write_servos = 1;
+                need_print_servos = 1;
+                break;
+            
+            case 't':
+                tilt_sign *= -1;
+                need_print_servos = 1;
+                break;
+            
+            case 'p':
+                pan_sign *= -1;
+                need_print_servos = 1;
+                break;
+           
+        }
+        
+        if(need_print_servos && current_operation == CONFIGURING)
+        {
+            char string[BCTEXTLEN];
+            sprintf(string, 
+                "PAN=%d\nTILT=%d\nPAN_SIGN=%d\nTILT_SIGN=%d", 
+                (int)(pan - (MAX_PWM + MIN_PWM) / 2),
+                (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
+                pan_sign,
+                tilt_sign);
+            int line_h = get_text_height(LARGEFONT, "0");
+            int text_h = get_text_height(LARGEFONT, string);
+            int text_w = get_text_width(LARGEFONT, string);
+            int text_x = WINDOW_W - MARGIN - text_w;
+            int text_y = line_h + MARGIN;
+            clear_box(text_x, text_y - line_h, text_w, text_h);
+            set_color(WHITE);
+            draw_text(text_x, 
+                text_y, 
+                string);
+            flash(text_x, text_y - line_h, text_w, text_h, 1);
+        }
+        
+        if(need_write_servos)
+        {
+            write_servos(1);
+        }
+
+// trap all of them
+        return 1;
+    }
+    
+};
+
+static GUI *gui;
+
+class GUIThread : public Thread
+{
+public:
+    GUIThread() : Thread()
+    {
+    }
+
+    void run()
+    {
+        gui->run_window();
+        exit(0);
+    }
+};
+
+static GUIThread gui_thread;
+static BC_Bitmap *gui_bitmap = 0;
+
+
+void init_gui()
+{
+    gui = new GUI();
+    gui_bitmap = new BC_Bitmap(gui, 
+	    WINDOW_W,
+	    WINDOW_H,
+	    BC_BGR8888,
+	    1); // use_shm
+    gui->start_video();
+    gui->show_window();
+
+    gui_thread.start();
+}
+
+
+
+// draw a frame on the GUI
+void draw_video(unsigned char *src, 
+    int dst_x,
+    int dst_y,
+    int dst_w,
+    int dst_h,
+    int src_w,
+    int src_h,
+    int src_rowspan)
+{
+    unsigned char **dst_rows = gui_bitmap->get_row_pointers();
+
+// draw the video
+    int nearest_x[dst_w];
+    int nearest_y[dst_h];
+    for(int i = 0; i < dst_w; i++)
+    {
+        nearest_x[i] = i * src_w / dst_w;
+    }
+    for(int i = 0; i < dst_h; i++)
+    {
+        nearest_y[i] = i * src_h / dst_h;
+    }
+    
+    for(int i = 0; i < dst_h; i++)
+    {
+        unsigned char *src_row = src + nearest_y[i] * src_rowspan;
+        unsigned char *dst_row = dst_rows[i];
+        for(int j = 0; j < dst_w; j++)
+        {
+            int src_x = nearest_x[j];
+            *dst_row++ = src_row[src_x * 3 + 0];
+            *dst_row++ = src_row[src_x * 3 + 1];
+            *dst_row++ = src_row[src_x * 3 + 2];
+            dst_row++;
+        }
+    }    
+
+    gui->lock_window();
+    gui->draw_bitmap(gui_bitmap, 
+	    1,
+	    dst_x, // dst coords
+	    dst_y,
+	    dst_w,
+	    dst_h,
+	    0, // src coords
+	    0,
+	    dst_w,
+	    dst_h);
+    gui->unlock_window();
+}
+
 
 
 
@@ -478,9 +838,9 @@ public:
                                 int64_t diff = TO_MS(time2) - TO_MS(time1);
                                 if(diff >= 1000)
                                 {
-                                    printf("FrameInput::reader_thread %d FPS: %f\n",
-                                        __LINE__,
-                                        (double)frame_count * 1000 / diff);
+//                                     printf("FrameInput::reader_thread %d FPS: %f\n",
+//                                         __LINE__,
+//                                         (double)frame_count * 1000 / diff);
                                     frame_count = 0;
                                     gettimeofday(&time1, 0);
                                 }
@@ -591,6 +951,175 @@ sem_t FrameInput::frame_ready_sema;
 
 
 
+void quit(int sig)
+{
+// reset the console
+	struct termios info;
+	tcgetattr(fileno(stdin), &info);
+	info.c_lflag |= ICANON;
+	info.c_lflag |= ECHO;
+	tcsetattr(fileno(stdin), TCSANOW, &info);
+    exit(0);
+}
+
+
+
+// void* configure_thread(void *ptr)
+// {
+//     int result = init_servos();
+//     if(result)
+//     {
+// // don't use the camera mount
+//         processing = 1;
+//         return 0;
+//     }
+// 
+// 	struct termios term_info;
+// 	struct termios default_term_info;
+//     int in_fd = -1;
+// 	in_fd = fileno(stdin);
+// 	tcgetattr(in_fd, &default_term_info);
+// 	tcgetattr(in_fd, &term_info);
+// 	term_info.c_lflag &= ~ICANON;
+// 	term_info.c_lflag &= ~ECHO;
+// 	tcsetattr(in_fd, TCSANOW, &term_info);
+// 
+// 
+// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
+// // __LINE__,
+// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
+// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
+// // pan_sign,
+// // tilt_sign);
+// 
+//     printf("-----------------------------------------------------\n");
+//     printf("Welcome to the tracker\n");
+//     printf("Press SPACE or ENTER to activate mount\n");
+//     printf("ESC to give up & go to a movie.\n");
+//     while(1)
+//     {
+//         uint8_t c;
+//         int _ = read(in_fd, &c, 1);
+// 
+//         if(c == ' ' ||
+//             c == '\n')
+//         {
+//             break;
+//         }
+// 
+//         if(c == 27)
+//         {
+//             quit(0);
+//             break;
+//         }
+//     }
+// 
+// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
+// // __LINE__,
+// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
+// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
+// // pan_sign,
+// // tilt_sign);
+// 
+// // write it a few times to defeat UART initialization glitches
+//     write_servos(1);
+//     usleep(100000);
+//     write_servos(1);
+//     usleep(100000);
+//     write_servos(1);
+//     usleep(100000);
+//     write_servos(1);
+// 
+// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
+// // __LINE__,
+// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
+// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
+// // pan_sign,
+// // tilt_sign);
+// 
+//     printf("-----------------------------------------------------\n");
+//     printf("Press keys to aim mount.\n");
+//     printf("PWM Values should be as close to 0 as possible.\n");
+//     printf("a - left\n");
+//     printf("d - right\n");
+//     printf("w - up\n");
+//     printf("s - down\n");
+//     printf("p - reverse pan sign\n");
+//     printf("t - reverse tilt sign\n");
+//     printf("SPACE or ENTER to save defaults & begin tracking\n");
+//     printf("ESC to give up & go to a movie.\n");
+//     int done = 0;
+//     while(!done)
+//     {
+//         uint8_t c;
+//         int print_servos = 0;
+//         int _ = read(in_fd, &c, 1);
+// 
+//         switch(c)
+//         {
+//             case 27:
+//                 save_defaults();
+//                 quit(0);
+//                 break;
+// 
+//             case ' ':
+//             case '\n':
+//                 printf("\nBeginning tracking\n");
+//                 done = 1;
+//                 break;
+//             case 'a':
+//                 pan -= PAN_STEP * pan_sign;
+//                 write_servos(1);
+//                 print_servos = 1;
+//                 break;
+//             case 'd':
+//                 pan += PAN_STEP * pan_sign;
+//                 write_servos(1);
+//                 print_servos = 1;
+//                 break;
+//             case 's':
+//                 tilt -= TILT_STEP * tilt_sign;
+//                 write_servos(1);
+//                 print_servos = 1;
+//                 break;
+//             case 'w':
+//                 tilt += TILT_STEP * tilt_sign;
+//                 write_servos(1);
+//                 print_servos = 1;
+//                 break;
+//             case 't':
+//                 tilt_sign *= -1;
+//                 print_servos = 1;
+//                 break;
+//             case 'p':
+//                 pan_sign *= -1;
+//                 print_servos = 1;
+//                 break;
+//         }
+// 
+//         if(print_servos)
+//         {
+//             printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d       \r", 
+//                 __LINE__,
+//                 (int)(pan - (MAX_PWM + MIN_PWM) / 2),
+//                 (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
+//                 pan_sign,
+//                 tilt_sign);
+//             fflush(stdout);
+//         }
+//     }
+// 
+// 	tcsetattr(in_fd, TCSANOW, &default_term_info);
+//     close(in_fd);
+// 
+//     start_pan = pan;
+//     start_tilt = tilt;
+//     save_defaults();
+// 
+//     processing = 1;
+// }
+
+
 
 class Process : public op::WorkerConsumer<std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>>
 {
@@ -600,6 +1129,7 @@ public:
     void initializationOnThread() 
     {
         clock_gettime(CLOCK_MONOTONIC, &time1);
+        
     }
    
     
@@ -637,15 +1167,20 @@ public:
 
     void workConsumer(const std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>& datumsPtr)
     {
-
         if (datumsPtr != nullptr && !datumsPtr->empty())
         {
 // get frame period in seconds
             struct timespec time2;
             clock_gettime(CLOCK_MONOTONIC, &time2);
-            double delta = (double)((time2.tv_sec * 1000 + time2.tv_nsec / 1000000) -
+            double delta = 
+                (double)((time2.tv_sec * 1000 + time2.tv_nsec / 1000000) -
                 (time1.tv_sec * 1000 + time1.tv_nsec / 1000000)) / 1000;
             time1 = time2;
+            if(!have_time1)
+            {
+                delta = 0;
+            }
+            have_time1 = 1;
 
 
 // printf("Process::workConsumer %d %d %d delta=%f\n", 
@@ -657,16 +1192,15 @@ public:
 
             const auto& poseKeypoints = datumsPtr->at(0)->poseKeypoints;
             const auto& image = datumsPtr->at(0)->cvOutputData;
-            width = image.cols;
-            height = image.rows;
-            center_x = width / 2;
-//            center_y = height * 1 / 4;    
-            center_y = height / 2;
-            int humans = poseKeypoints.getSize(0);
-            if(humans > MAX_HUMANS)
+
+            if(current_operation == TRACKING)
             {
-                humans = MAX_HUMANS;
-            }
+
+                int humans = poseKeypoints.getSize(0);
+                if(humans > MAX_HUMANS)
+                {
+                    humans = MAX_HUMANS;
+                }
 //             printf("Process::workConsumer %d frame=%d humans=%d w=%d h=%d\n", 
 //                 __LINE__, 
 //                 frames,
@@ -675,127 +1209,251 @@ public:
 //                 height);
 
 
-            for (int human = 0 ; 
-                human < humans; 
-                human++)
-            {
-                const auto& bodyParts = poseKeypoints.getSize(1);
-                rect_t *rect = &rects[human];
-// reset the zones
-                reset_zone(&rect->head, head_parts);
-                reset_zone(&rect->body, body_parts);
-
-
-                if(bodyParts >= 25)
+                for (int human = 0 ; 
+                    human < humans; 
+                    human++)
                 {
-// get bounding box of all body parts for now
-                    int have_body_part = 0;
-                    for(int body_part = 0; body_part < BODY_PARTS; body_part++)
+                    const auto& bodyParts = poseKeypoints.getSize(1);
+                    body_t *body = &bodies[human];
+// reset the zones
+                    for(int i = 0; i < TOTAL_ZONES; i++)
                     {
-                        int x = (int)poseKeypoints[{ human, body_part, 0 }];
-                        int y = (int)poseKeypoints[{ human, body_part, 1 }];
-
-// body part was detected
-                        if(x > 0 && y > 0)
-                        {
-// initialize the coords
-                            if(!have_body_part)
-                            {
-                                rect->x1 = rect->x2 = x;
-                                rect->y1 = rect->y2 = y;
-                                have_body_part = 1;
-                            }
-                            else
-                            {
-// get extents of coords
-                                if(rect->x1 > x)
-                                {
-                                    rect->x1 = x;
-                                }
-
-                                if(rect->x2 < x)
-                                {
-                                    rect->x2 = x;
-                                }
-
-                                if(rect->y1 > y)
-                                {
-                                    rect->y1 = y;
-                                }
-
-                                if(rect->y2 < y)
-                                {
-                                    rect->y2 = y;
-                                }
-                            }
-                            
-                            
-// update the zone this body part belongs to
-                            update_zone(&rect->head, body_part, x, y);
-                            update_zone(&rect->body, body_part, x, y);
-                        }
+                        reset_zone(&body->zones[i], zone_parts[i]);
                     }
 
 
+                    if(bodyParts >= 25)
+                    {
+// get bounding box of all body parts for now
+                        int have_body_part = 0;
+                        for(int body_part = 0; body_part < BODY_PARTS; body_part++)
+                        {
+                            int x = (int)poseKeypoints[{ human, body_part, 0 }];
+                            int y = (int)poseKeypoints[{ human, body_part, 1 }];
+
+// body part was detected
+                            if(x > 0 && y > 0)
+                            {
+// initialize the coords
+                                if(!have_body_part)
+                                {
+                                    body->x1 = body->x2 = x;
+                                    body->y1 = body->y2 = y;
+                                    have_body_part = 1;
+                                }
+                                else
+                                {
+// get extents of coords
+                                    if(body->x1 > x)
+                                    {
+                                        body->x1 = x;
+                                    }
+
+                                    if(body->x2 < x)
+                                    {
+                                        body->x2 = x;
+                                    }
+
+                                    if(body->y1 > y)
+                                    {
+                                        body->y1 = y;
+                                    }
+
+                                    if(body->y2 < y)
+                                    {
+                                        body->y2 = y;
+                                    }
+                                }
+
+
+// update the zone this body part belongs to
+                                for(int i = 0; i < TOTAL_ZONES; i++)
+                                {
+                                    update_zone(&body->zones[i], body_part, x, y);
+                                }
+                            }
+                        }
+
+// get the head size from the zones
+                        if(body->zones[NECK_ZONE].total &&
+                            body->zones[HEAD_ZONE].total)
+                        {
+                            body->head_size = body->zones[NECK_ZONE].max_y -
+                                body->zones[HEAD_ZONE].min_y;
+                        }
+
+
 // debug
-                    printf("head: y=%d-%d total=%d body: y=%d-%d total=%d\n", 
-                        rect->head.min_y, 
-                        rect->head.max_y, 
-                        rect->head.total,
-                        rect->body.min_y, 
-                        rect->body.max_y, 
-                        rect->body.total);
+//                     for(int i = 0; i < TOTAL_ZONES; i++)
+//                     {
+//                         if(body->zones[i].total)
+//                         {
+//                             printf("zone %d: y=%d-%d total=%d ", 
+//                                 i,
+//                                 body->zones[i].min_y, 
+//                                 body->zones[i].max_y, 
+//                                 body->zones[i].total);
+//                         }
+//                     }
+//                     printf("\n");
+                    }
                 }
-            }
-            
+
 // focal point of all humans
-            float total_x = 0;
-            float total_y = 0;
-            for(int human = 0; human < humans; human++)
-            {
-                rect_t *rect = &rects[human];
-// average top center X
-                total_x += (rect->x1 + rect->x2) / 2;
-// take highest Y
-//                 if(human == 0 || total_y > rect->y1)
-//                 {
-//                     total_y = rect->y1;
-//                 }
-// take center Y
-                total_y += (rect->y1 + rect->y2) / 2;
-            }
-// want the total_ point to be here
+                float total_x = 0;
+                float total_y = 0;
+                int width = image.cols;
+                int height = image.rows;
+                int center_x = width / 2;
+                int center_y = height / 2;
+                int biggest_body = 0;
+                int biggest_h = 0;
+                zone_t zones[TOTAL_ZONES];
+                int head_size = 0;
 
-            if(humans > 0)
-            {
-                total_x /= humans;
-                last_x = total_x;
-                last_y = total_y;
-            
+                for(int human = 0; human < humans; human++)
+                {
+                    body_t *body = &bodies[human];
+// average center X of all bodies
+                    total_x += (body->x1 + body->x2) / 2;
 
-                int x_error = total_x - center_x;
-                int y_error = total_y - center_y;
-// printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
-// __LINE__, (int)total_x, rects[0].x1, rects[0].x2, x_error, y_error);
-                float pan_change = delta * X_GAIN * x_error;
-                float tilt_change = delta * Y_GAIN * y_error;
-                pan += pan_change * pan_sign;
-//                tilt -= tilt_change * tilt_sign;
-                write_servos(0);
-            }
-//             else
-// // use last known coords
-//             if(last_x > 0 && last_y > 0)
-//             {
-//                 int x_error = last_x - center_x;
-//                 int y_error = last_y - center_y;
-//                 float pan_change = delta * GAIN * x_error;
-//                 float tilt_change = delta * GAIN * y_error;
-//                 pan -= pan_change;
-//                 write_servos(0);
-//             }
+// use the biggest body for vertical measurements
+                    if(body->y2 - body->y1 > biggest_h)
+                    {
+                        biggest_body = human;
+                        biggest_h = body->y2 - body->y1;
+                        total_y += (body->y1 + body->y2) / 2;
+                        head_size = body->head_size;
+                        for(int i = 0; i < TOTAL_ZONES; i++)
+                        {
+                            memcpy(&zones[i], &body->zones[i], sizeof(zone_t));
+                        }
+                    }
+                }
+
+
+// convert to EOS RP frame size
+                head_size = NORMALIZE_DISTANCE(head_size);
+
+                if(humans > 0)
+                {
+                    total_x /= humans;
+
+
+                    int x_error = total_x - center_x;
+    // printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
+    // __LINE__, (int)total_x, bodies[0].x1, bodies[0].x2, x_error, y_error);
+                    float pan_change = delta * X_GAIN * NORMALIZE_DISTANCE(x_error);
+                    CLAMP(pan_change, -MAX_PAN_CHANGE, MAX_PAN_CHANGE);
+                    pan += pan_change * pan_sign;
+
+
+#ifdef TRACK_TILT
+// top_y depends on the head size
+                    int top_y = height / 8;
+                    int top_y1 = top_y;
+                    int top_y2 = height / 3;
+// EOS RP frame sizes
+                    int head_size1 = 150;
+                    int head_size2 = 250;
+                    if(head_size >= head_size1 && head_size < head_size2)
+                    {
+                        double fraction = (double)(head_size - head_size1) / 
+                            (head_size2 - head_size1);
+                        top_y = (int)(fraction * top_y2 + 
+                            (1.0 - fraction) * top_y1);
+                    }
+                    else
+                    if(head_size >= head_size2)
+                    {
+                        top_y = top_y2;
+                    }
+printf("Process: workConsumer %d: head_size=%d top_y=%d\n", 
+__LINE__, 
+head_size,
+top_y);
+                
+                    int y_error = 0;
+                    float tilt_change = 0;
+// all zones visible.  Track the center or the head.
+                    if(zones[0].total > 0 &&
+                        zones[1].total > 0 &&
+                        zones[2].total > 0 &&
+                        zones[3].total > 0)
+                    {
+// limit the head
+                        if(zones[0].min_y < top_y)
+                        {
+                            y_error = zones[0].min_y - top_y;
+                        }
+                        else
+                        {
+                            y_error = total_y - center_y;
+                        }
+
+                    }
+                    else
+    // head is visible but other zones are hidden.  Track the head.
+                    if(zones[0].total > 0)
+                    {
+                        y_error = zones[0].min_y - top_y;
+                    }
+    // other zones are visible but head is hidden.  Tilt up.
+                    else
+                    if(zones[1].total > 0 ||
+                        zones[2].total > 0 ||
+                        zones[3].total > 0)
+                    {
+                        y_error = -TILT_SEARCH;
+                    }
+
+                    if(y_error != 0)
+                    {
+                        tilt_change = delta * Y_GAIN * NORMALIZE_DISTANCE(y_error);
+                        CLAMP(tilt_change, -MAX_TILT_CHANGE, MAX_TILT_CHANGE);
+                        tilt -= tilt_change * tilt_sign;
+                    }
+    #endif // TRACK_TILT
+
+//                printf("pan_change=%d tilt_change=%d\n", (int)pan_change, (int)tilt_change);
+//                    printf("pan=%d tilt=%d\n", (int)(pan - start_pan), (int)(tilt - start_tilt));
+
+                    write_servos(0);
+                }
+            } // current_operation == TRACKING
 
             frames++;
+            
+            
+            
+            // show the output frame on the GUI
+            if(current_operation == CONFIGURING ||
+                current_operation == STARTUP)
+            {
+                int dst_h = WINDOW_H * 3 / 4;
+                int dst_w = dst_h * image.cols / image.rows;
+                draw_video((unsigned char*)image.ptr(0), 
+                    WINDOW_W - dst_w,
+                    WINDOW_H - dst_h,
+                    dst_w,
+                    dst_h,
+                    image.cols,
+                    image.rows,
+                    image.cols * 3);
+            }
+            else
+            {
+                int dst_h = WINDOW_H;
+                int dst_w = WINDOW_H * image.cols / image.rows;
+                draw_video((unsigned char*)image.ptr(0), 
+                    WINDOW_W / 2 - dst_w / 2,
+                    0,
+                    dst_w, 
+                    dst_h,
+                    image.cols,
+                    image.rows,
+                    image.cols * 3);
+            }
         }
         
         
@@ -810,299 +1468,40 @@ public:
 
 
 
-
-void quit(int sig)
-{
-// reset the console
-	struct termios info;
-	tcgetattr(fileno(stdin), &info);
-	info.c_lflag |= ICANON;
-	info.c_lflag |= ECHO;
-	tcsetattr(fileno(stdin), TCSANOW, &info);
-    exit(0);
-}
-
-
-void load_defaults()
-{
-    char *home = getenv("HOME");
-    char string[TEXTLEN];
-    sprintf(string, "%s/.tracker.rc", home);
-    FILE *fd = fopen(string, "r");
-    
-    if(!fd)
-    {
-        printf("load_defaults %d: Couldn't open %s for reading\n", 
-            __LINE__, 
-            string);
-        return;
-    }
-    
-    while(!feof(fd))
-    {
-        if(!fgets(string, TEXTLEN, fd)) break;
-// get 1st non whitespace character
-        char *key = string;
-        while((*key == ' ' ||
-            *key == '\t' ||
-            *key == '\n') && 
-            *key != 0)
-        {
-            key++;
-        }
-
-// comment or empty
-        if(*key == '#' || *key == 0)
-        {
-            continue;
-        }
-        
-// get start of value
-        char *value = key;
-        while(*value != ' ' && 
-            *value != '\t' && 
-            *value != '\n' && 
-            *value != 0)
-        {
-            value++;
-        }
-
-
-        while((*value == ' ' ||
-            *value == '\t' ||
-            *value == '\n') && 
-            *value != 0)
-        {
-            *value = 0;
-            value++;
-        }
-
-        if(*value == 0)
-        {
-// no value given
-            continue;
-        }
-
-// delete the newline
-        char *end = value;
-        while(*end != '\n' && 
-            *end != 0)
-        {
-            end++;
-        }
-        
-        if(*end == '\n')
-        {
-            *end = 0;
-        }
-        
-        printf("load_defaults %d key='%s' value='%s'\n", __LINE__, key, value);
-        if(!strcasecmp(key, "PAN"))
-        {
-            pan = atof(value);
-        }
-        else
-        if(!strcasecmp(key, "TILT"))
-        {
-            tilt = atof(value);
-        }
-        else
-        if(!strcasecmp(key, "PAN_SIGN"))
-        {
-            pan_sign = atoi(value);
-        }
-        else
-        if(!strcasecmp(key, "TILT_SIGN"))
-        {
-            tilt_sign = atoi(value);
-        }        
-    }
-    
-    fclose(fd);
-}
-
-void save_defaults()
-{
-    char *home = getenv("HOME");
-    char string[TEXTLEN];
-    sprintf(string, "%s/.tracker.rc", home);
-    FILE *fd = fopen(string, "w");
-    
-    if(!fd)
-    {
-        printf("save_defaults %d: Couldn't open %s for writing\n", 
-            __LINE__, 
-            string);
-        return;
-    }
-    
-    fprintf(fd, "PAN %d\n", (int)pan);
-    fprintf(fd, "TILT %d\n", (int)tilt);
-    fprintf(fd, "PAN_SIGN %d\n", pan_sign);
-    fprintf(fd, "TILT_SIGN %d\n", tilt_sign);
-    
-    fclose(fd);
-}
-
-
 int main(int argc, char *argv[])
 {
-    int result = init_servos();
-	struct termios term_info;
-	struct termios default_term_info;
-
 // set up the camera mount
-    if(!result)
+    signal(SIGHUP, quit);
+    signal(SIGINT, quit);
+    signal(SIGQUIT, quit);
+    signal(SIGTERM, quit);
+
+    load_defaults();
+
+    init_gui();
+    int result = init_servos();
+    if(result)
     {
-        signal(SIGHUP, quit);
-        signal(SIGINT, quit);
-        signal(SIGQUIT, quit);
-        signal(SIGTERM, quit);
-
-        load_defaults();
-        
-        
-        
-        int in_fd = -1;
-	    in_fd = fileno(stdin);
-	    tcgetattr(in_fd, &default_term_info);
-	    tcgetattr(in_fd, &term_info);
-	    term_info.c_lflag &= ~ICANON;
-	    term_info.c_lflag &= ~ECHO;
-	    tcsetattr(in_fd, TCSANOW, &term_info);
-        
-
-// printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// __LINE__,
-// (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// pan_sign,
-// tilt_sign);
-
-        printf("-----------------------------------------------------\n");
-        printf("Welcome to the tracker\n");
-        printf("Press SPACE or ENTER to activate mount\n");
-        printf("ESC to give up & go to a movie.\n");
-        while(1)
-        {
-            uint8_t c;
-            int _ = read(in_fd, &c, 1);
-            
-            if(c == ' ' ||
-                c == '\n')
-            {
-                break;
-            }
-            
-            if(c == 27)
-            {
-                quit(0);
-                break;
-            }
-        }
-
-// printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// __LINE__,
-// (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// pan_sign,
-// tilt_sign);
-
-// write it a few times to defeat UART initialization glitches
-        write_servos(1);
-        usleep(100000);
-        write_servos(1);
-        usleep(100000);
-        write_servos(1);
-        usleep(100000);
-        write_servos(1);
-
-// printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// __LINE__,
-// (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// pan_sign,
-// tilt_sign);
-
-        printf("-----------------------------------------------------\n");
-        printf("Press keys to aim mount.\n");
-        printf("PWM Values should be as close to 0 as possible.\n");
-        printf("a - left\n");
-        printf("d - right\n");
-        printf("w - up\n");
-        printf("s - down\n");
-        printf("p - reverse pan sign\n");
-        printf("t - reverse tilt sign\n");
-        printf("SPACE or ENTER to save defaults & begin tracking\n");
-        printf("ESC to give up & go to a movie.\n");
-        int done = 0;
-        while(!done)
-        {
-            uint8_t c;
-            int print_servos = 0;
-            int _ = read(in_fd, &c, 1);
-
-            switch(c)
-            {
-                case 27:
-                    save_defaults();
-                    quit(0);
-                    break;
-
-                case ' ':
-                case '\n':
-                    printf("\nBeginning tracking\n");
-                    done = 1;
-                    break;
-                case 'a':
-                    pan -= PAN_STEP * pan_sign;
-                    write_servos(1);
-                    print_servos = 1;
-                    break;
-                case 'd':
-                    pan += PAN_STEP * pan_sign;
-                    write_servos(1);
-                    print_servos = 1;
-                    break;
-                case 's':
-                    tilt -= TILT_STEP * tilt_sign;
-                    write_servos(1);
-                    print_servos = 1;
-                    break;
-                case 'w':
-                    tilt += TILT_STEP * tilt_sign;
-                    write_servos(1);
-                    print_servos = 1;
-                    break;
-                case 't':
-                    tilt_sign *= -1;
-                    print_servos = 1;
-                    break;
-                case 'p':
-                    pan_sign *= -1;
-                    print_servos = 1;
-                    break;
-            }
-
-            if(print_servos)
-            {
-                printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d       \r", 
-                    __LINE__,
-                    (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-                    (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-                    pan_sign,
-                    tilt_sign);
-                fflush(stdout);
-            }
-        }
-
-	    tcsetattr(in_fd, TCSANOW, &default_term_info);
-        close(in_fd);
-
-        start_pan = pan;
-        start_tilt = tilt;
-        save_defaults();
+// don't use the camera mount
+        current_operation = TRACKING;
     }
+    else
+    {
+        gui->lock_window();
+        gui->set_font(LARGEFONT);
+        gui->set_color(WHITE);
+        int text_h = gui->get_text_height(LARGEFONT, "q0");
+        int y = text_h + MARGIN;
+        int x = MARGIN;
+        gui->draw_text(x, 
+            y, 
+            "Welcome to the tracker\n\n"
+            "Press SPACE or ENTER to activate the mount\n\n"
+            "ESC to give up & go to a movie.");
+        gui->flash(1);
+        gui->unlock_window();
+    }
+
 
 // custom input
     op::Wrapper opWrapper;
@@ -1154,8 +1553,8 @@ int main(int argc, char *argv[])
 
 // Pose configuration (use WrapperStructPose{} for default and recommended configuration)
 //    const auto netInputSize = op::flagsToPoint("-1x160", "-1x160");
-//    const auto netInputSize = op::flagsToPoint("-1x256", "-1x256");
-    const auto netInputSize = op::flagsToPoint("-1x368", "-1x368");
+    const auto netInputSize = op::flagsToPoint("-1x256", "-1x256");
+//    const auto netInputSize = op::flagsToPoint("-1x368", "-1x368");
     const auto outputSize = op::flagsToPoint("-1x-1", "-1x-1");
     const auto keypointScale = op::flagsToScaleMode(0);
     const auto multipleView = false;
@@ -1185,7 +1584,7 @@ int main(int argc, char *argv[])
         heatMapScale, 
         false, // FLAGS_part_candidates
         (float)0.05, // FLAGS_render_threshold
-        1, // FLAGS_number_people_max
+        MAX_HUMANS, // FLAGS_number_people_max
         false, // FLAGS_maximize_positives
         -1, // FLAGS_fps_max
         "", // FLAGS_prototxt_path
@@ -1197,7 +1596,7 @@ int main(int argc, char *argv[])
 
 
 // Face configuration (use op::WrapperStructFace{} to disable it)
-    const auto faceNetInputSize = op::flagsToPoint("368x368", "368x368 (multiples of 16)");
+//    const auto faceNetInputSize = op::flagsToPoint("368x368", "368x368 (multiples of 16)");
         
 //     const op::WrapperStructFace wrapperStructFace
 //     {
@@ -1213,7 +1612,7 @@ int main(int argc, char *argv[])
 
 
 // Hand configuration (use op::WrapperStructHand{} to disable it)
-    const auto handNetInputSize = op::flagsToPoint("368x368", "368x368 (multiples of 16)");
+//    const auto handNetInputSize = op::flagsToPoint("368x368", "368x368 (multiples of 16)");
     
 //     const op::WrapperStructHand wrapperStructHand
 //     {
@@ -1311,12 +1710,13 @@ int main(int argc, char *argv[])
     const op::WrapperStructGui wrapperStructGui
     {
 // show a window on the screen
-        op::flagsToDisplayMode(-1, false), 
+//        op::flagsToDisplayMode(-1, false), 
+// draw info on the exported frames
+        op::flagsToDisplayMode(0, false), 
         true, // guiVerbose
-        false, // FLAGS_fullscreen
+        false, // FLAGS_fullscreen.  Doesn't work.
     };
     opWrapper.configure(wrapperStructGui);
-
 
     opWrapper.exec();
 
