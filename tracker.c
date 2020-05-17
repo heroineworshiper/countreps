@@ -100,7 +100,8 @@
 // different parameters for different lenses
 #define LENS_15 0
 #define LENS_28 1
-#define TOTAL_LENSES 2
+#define LENS_50 2
+#define TOTAL_LENSES 3
 
 typedef struct
 {
@@ -120,7 +121,8 @@ typedef struct
 lens_t lenses[] = 
 {
     { 100, 100, 4, 4, 50, 50, 200 }, // 15mm
-    { 100, 100, 2, 2, 25, 25, 200 }, // 28mm
+    { 100, 100, 2, 2, 50, 50, 150 }, // 28mm
+    { 50, 50, 1, 1, 50, 50, 100 }, // 50mm
 };
 
 
@@ -495,6 +497,11 @@ const char* lens_to_text(int lens)
         case LENS_28:
             return "28mm";
             break;
+        case LENS_50:
+            return "50mm";
+            break;
+        default:
+            return "Unknown";
     }
 }
 
@@ -583,25 +590,25 @@ public:
                 break;
             
             case 'w':
-                tilt += TILT_STEP * tilt_sign;
+                tilt += lenses[lens].tilt_step * tilt_sign;
                 need_write_servos = 1;
                 need_print_values = 1;
                 break;
             
             case 's':
-                tilt -= TILT_STEP * tilt_sign;
+                tilt -= lenses[lens].tilt_step * tilt_sign;
                 need_write_servos = 1;
                 need_print_values = 1;
                 break;
             
             case 'a':
-                pan -= PAN_STEP * pan_sign;
+                pan -= lenses[lens].pan_step * pan_sign;
                 need_write_servos = 1;
                 need_print_values = 1;
                 break;
             
             case 'd':
-                pan += PAN_STEP * pan_sign;
+                pan += lenses[lens].pan_step * pan_sign;
                 need_write_servos = 1;
                 need_print_values = 1;
                 break;
@@ -1360,7 +1367,7 @@ public:
 // average center X of all bodies
                     total_x += (body->x1 + body->x2) / 2;
 
-// use the biggest body for vertical measurements
+// use the tallest body for vertical measurements
                     if(body->y2 - body->y1 > biggest_h)
                     {
                         biggest_body = human;
@@ -1386,8 +1393,12 @@ public:
                     int x_error = total_x - center_x;
     // printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
     // __LINE__, (int)total_x, bodies[0].x1, bodies[0].x2, x_error, y_error);
-                    float pan_change = delta * X_GAIN * NORMALIZE_DISTANCE(x_error);
-                    CLAMP(pan_change, -MAX_PAN_CHANGE, MAX_PAN_CHANGE);
+                    float pan_change = delta * 
+                        lenses[lens].x_gain * 
+                        NORMALIZE_DISTANCE(x_error);
+                    CLAMP(pan_change, 
+                        -lenses[lens].max_pan_change, 
+                        lenses[lens].max_pan_change);
                     pan += pan_change * pan_sign;
 
 
@@ -1447,13 +1458,17 @@ top_y);
                         zones[2].total > 0 ||
                         zones[3].total > 0)
                     {
-                        y_error = -TILT_SEARCH;
+                        y_error = -lenses[lens].tilt_search;
                     }
 
                     if(y_error != 0)
                     {
-                        tilt_change = delta * Y_GAIN * NORMALIZE_DISTANCE(y_error);
-                        CLAMP(tilt_change, -MAX_TILT_CHANGE, MAX_TILT_CHANGE);
+                        tilt_change = delta * 
+                            lenses[lens].y_gain * 
+                            NORMALIZE_DISTANCE(y_error);
+                        CLAMP(tilt_change, 
+                            -lenses[lens].max_tilt_change, 
+                            lenses[lens].max_tilt_change);
                         tilt -= tilt_change * tilt_sign;
                     }
     #endif // TRACK_TILT
