@@ -81,20 +81,9 @@
 #define MIN_PWM 1000
 #define MAX_PWM 32700
 
-static float pan = 18676;
-static float tilt = 21076;
-static float start_pan = pan;
-static float start_tilt = tilt;
-static int pan_sign = 1;
-static int tilt_sign = 1;
-
 // PWM limits beyond starting point for tracking
 #define TILT_MAG 1500
 #define PAN_MAG 5000
-
-// manual step
-#define PAN_STEP 100
-#define TILT_STEP 100
 
 #ifdef __clang__
 #define MODELS "../openpose.mac/models/"
@@ -108,19 +97,36 @@ static int tilt_sign = 1;
 #define CLAMP(x, y, z) ((x) = ((x) < (y) ? (y) : ((x) > (z) ? (z) : (x))))
 #define TO_MS(x) ((x).tv_sec * 1000 + (x).tv_usec / 1000)
 
-// PID gain per second
-#define X_GAIN 4
-#define Y_GAIN 4
+// different parameters for different lenses
+#define LENS_15 0
+#define LENS_28 1
+#define TOTAL_LENSES 2
+
+typedef struct
+{
+// manual step
+    int pan_step;
+    int tilt_step;
+// PID gain
+    float x_gain;
+    float y_gain;
+// Limit of PWM changes
+    int max_tilt_change;
+    int max_pan_change;
+// Y error when head is above frame
+    int tilt_search;
+} lens_t;
+
+lens_t lenses[] = 
+{
+    { 100, 100, 4, 4, 50, 50, 200 }, // 15mm
+    { 100, 100, 2, 2, 25, 25, 200 }, // 28mm
+};
+
+
 
 // normalize the error pixels to the EOS RP preview frame sizes
 #define NORMALIZE_DISTANCE(error) (error * 576 / height)
-
-// Limit of PWM changes
-#define MAX_TILT_CHANGE 50
-#define MAX_PAN_CHANGE 50
-
-// Search speed when head is above frame
-#define TILT_SEARCH 200
 
 // the body parts as defined in 
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -209,6 +215,14 @@ typedef struct
 } body_t;
 
 static body_t bodies[MAX_HUMANS];
+
+static float pan = 18676;
+static float tilt = 21076;
+static float start_pan = pan;
+static float start_tilt = tilt;
+static int pan_sign = 1;
+static int tilt_sign = 1;
+static int lens = LENS_15;
 
 static int servo_fd = -1;
 static int frames = 0;
@@ -437,6 +451,11 @@ void load_defaults()
         {
             tilt_sign = atoi(value);
         }        
+        else
+        if(!strcasecmp(key, "LENS"))
+        {
+            lens = atoi(value);
+        }        
     }
     
     fclose(fd);
@@ -461,11 +480,23 @@ void save_defaults()
     fprintf(fd, "TILT %d\n", (int)tilt);
     fprintf(fd, "PAN_SIGN %d\n", pan_sign);
     fprintf(fd, "TILT_SIGN %d\n", tilt_sign);
+    fprintf(fd, "LENS %d\n", lens);
     
     fclose(fd);
 }
 
-
+const char* lens_to_text(int lens)
+{
+    switch(lens)
+    {
+        case LENS_15:
+            return "15mm";
+            break;
+        case LENS_28:
+            return "28mm";
+            break;
+    }
+}
 
 class GUI : public BC_Window
 {
@@ -493,7 +524,7 @@ public:
     int keypress_event()
     {
 //        printf("GUI::keypress_event %d %c\n", __LINE__, get_keypress());
-        int need_print_servos = 0;
+        int need_print_values = 0;
         int need_write_servos = 0;
         switch(get_keypress())
         {
@@ -520,6 +551,7 @@ public:
                         "PWM Values should be as close to 0 as possible.\n"
                         "a - left   d - right   w - up   s - down\n"
                         "t - invert tilt sign   p - invert pan sign\n"
+                        "l - change lens\n"
                         "SPACE or ENTER to save defaults & begin tracking\n"
                         "ESC to give up & go to a movie.");
                     draw_text(x, 
@@ -535,6 +567,8 @@ public:
                     write_servos(1);
                     usleep(100000);
                     write_servos(1);
+                    
+                    need_print_values = 1;
                 }
                 else
                 if(current_operation == CONFIGURING)
@@ -551,48 +585,57 @@ public:
             case 'w':
                 tilt += TILT_STEP * tilt_sign;
                 need_write_servos = 1;
-                need_print_servos = 1;
+                need_print_values = 1;
                 break;
             
             case 's':
                 tilt -= TILT_STEP * tilt_sign;
                 need_write_servos = 1;
-                need_print_servos = 1;
+                need_print_values = 1;
                 break;
             
             case 'a':
                 pan -= PAN_STEP * pan_sign;
                 need_write_servos = 1;
-                need_print_servos = 1;
+                need_print_values = 1;
                 break;
             
             case 'd':
                 pan += PAN_STEP * pan_sign;
                 need_write_servos = 1;
-                need_print_servos = 1;
+                need_print_values = 1;
                 break;
             
             case 't':
                 tilt_sign *= -1;
-                need_print_servos = 1;
+                need_print_values = 1;
                 break;
             
             case 'p':
                 pan_sign *= -1;
-                need_print_servos = 1;
+                need_print_values = 1;
                 break;
            
+            case 'l':
+                lens++;
+                if(lens >= TOTAL_LENSES)
+                {
+                    lens = 0;
+                }
+                need_print_values = 1;
+                break;
         }
         
-        if(need_print_servos && current_operation == CONFIGURING)
+        if(need_print_values && current_operation == CONFIGURING)
         {
             char string[BCTEXTLEN];
             sprintf(string, 
-                "PAN=%d\nTILT=%d\nPAN_SIGN=%d\nTILT_SIGN=%d", 
+                "PAN=%d\nTILT=%d\nPAN_SIGN=%d\nTILT_SIGN=%d\nLENS=%s", 
                 (int)(pan - (MAX_PWM + MIN_PWM) / 2),
                 (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
                 pan_sign,
-                tilt_sign);
+                tilt_sign,
+                lens_to_text(lens));
             int line_h = get_text_height(LARGEFONT, "0");
             int text_h = get_text_height(LARGEFONT, string);
             int text_w = get_text_width(LARGEFONT, string);
