@@ -328,8 +328,11 @@ void write_servos(int use_pwm_limits)
 {
 	if(servo_fd >= 0)
 	{
-#define SYNC_CODE 0xe5
-#define BUFFER_SIZE 5
+#define SYNC_CODE0 0xff
+#define SYNC_CODE1 0x2d
+#define SYNC_CODE2 0xd4
+#define SYNC_CODE3 0xe5
+#define BUFFER_SIZE 8
 
 // limits are absolute PWM limits
         if(use_pwm_limits)
@@ -347,11 +350,14 @@ void write_servos(int use_pwm_limits)
         uint16_t pan_i = (uint16_t)pan;
         uint16_t tilt_i = (uint16_t)tilt;
 		char buffer[BUFFER_SIZE];
-        buffer[0] = SYNC_CODE;
-        buffer[1] = pan_i;
-        buffer[2] = pan_i >> 8;
-        buffer[3] = tilt_i;
-        buffer[4] = tilt_i >> 8;
+        buffer[0] = SYNC_CODE0;
+        buffer[1] = SYNC_CODE1;
+        buffer[2] = SYNC_CODE2;
+        buffer[3] = SYNC_CODE3;
+        buffer[4] = pan_i;
+        buffer[5] = pan_i >> 8;
+        buffer[6] = tilt_i;
+        buffer[7] = tilt_i >> 8;
 
 //printf("write_servos %d %d %d\n", __LINE__, pan_i,  tilt_i);
 		int temp = write(servo_fd, buffer, BUFFER_SIZE);

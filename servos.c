@@ -20,8 +20,7 @@
 
 // this runs on an atmega to drive the servos with PWM
 
-// starts in interactive mode where asdw manually points it
-// the 1st SYNC_CODE sends it into binary mode
+// reads packets starting with the sync code.  No interactive mode
 
 // compile with make servos
 // program fuses: make servos_fuse
@@ -46,7 +45,10 @@
 #define TILT_PORT PORTC
 #define TILT_DDR DDRC
 
-#define SYNC_CODE 0xe5
+#define SYNC_CODE0 0xff
+#define SYNC_CODE1 0x2d
+#define SYNC_CODE2 0xd4
+#define SYNC_CODE3 0xe5
 
 #define DEBUG_PIN 2
 #define DEBUG_PORT PORTD
@@ -59,6 +61,7 @@
 void (*input_state)();
 uint8_t buffer[4];
 uint8_t counter;
+uint8_t pwm_started = 0;
 
 // with DSLR
 uint16_t pan = 24976;
@@ -153,6 +156,14 @@ void make_pwm_table()
     new_table_size = i;
     have_new_table = 1;
     
+    if(!pwm_started)
+    {
+        pwm_started = 1;
+// enable the timer
+        bitSet(TIMSK1, TOIE1);
+    }
+        
+    
 //     for(i = 0; i < new_table_size; i++)
 //     {
 //         print_text("i=");
@@ -165,7 +176,8 @@ void make_pwm_table()
 //     }
 }
 
-void sync_code();
+void sync_code0();
+void sync_code1();
 
 
 void get_pwm()
@@ -173,7 +185,7 @@ void get_pwm()
     buffer[counter++] = uart_in;
     if(counter >= 4)
     {
-        input_state = sync_code;
+        input_state = sync_code0;
         pan = buffer[0] | (((uint16_t)buffer[1]) << 8);
         tilt = buffer[2] | (((uint16_t)buffer[3]) << 8);
         
@@ -181,44 +193,66 @@ void get_pwm()
     }
 }
 
-void sync_code()
+void sync_code3()
 {
-    if(uart_in == SYNC_CODE)
+    if(uart_in == SYNC_CODE3)
     {
         input_state = get_pwm;
         counter = 0;
     }
+    else
+    if(uart_in == SYNC_CODE0)
+    {
+        input_state = sync_code1;
+    }
+    else
+    {
+        input_state = sync_code0;
+    }
 }
 
-void interactive_mode()
+void sync_code2()
 {
-    uint16_t step = 100;
-    switch(uart_in)
+    if(uart_in == SYNC_CODE2)
     {
-        case SYNC_CODE:
-            input_state = get_pwm;
-            counter = 0;
-            break;
-        case 'w':
-            tilt += step;
-            break;
-        case 's':
-            tilt -= step;
-            break;
-        case 'a':
-            pan -= step;
-            break;
-        case 'd':
-            pan += step;
-            break;
+        input_state = sync_code3;
     }
-    print_text("pan=");
-    print_number(pan);
-    print_text("tilt=");
-    print_number(tilt);
-    print_byte('\n');
-    make_pwm_table();
+    else
+    if(uart_in == SYNC_CODE0)
+    {
+        input_state = sync_code1;
+    }
+    else
+    {
+        input_state = sync_code0;
+    }
 }
+
+void sync_code1()
+{
+    if(uart_in == SYNC_CODE1)
+    {
+        input_state = sync_code2;
+    }
+    else
+    if(uart_in == SYNC_CODE0)
+    {
+        input_state = sync_code1;
+    }
+    else
+    {
+        input_state = sync_code0;
+    }
+}
+
+void sync_code0()
+{
+    if(uart_in == SYNC_CODE0)
+    {
+        input_state = sync_code1;
+    }
+}
+
 
 int main()
 {
@@ -234,27 +268,27 @@ int main()
     make_pwm_table();
     
 // set pin to enable output
-	bitSet(DEBUG_DDR, DEBUG_PIN);
-	bitClear(DEBUG_PORT, DEBUG_PIN);
+//	bitSet(DEBUG_DDR, DEBUG_PIN);
+//	bitClear(DEBUG_PORT, DEBUG_PIN);
 
-// pitch pins
+// PWM pins
 	bitClear(PAN_PORT, PAN_PIN);
 	bitClear(TILT_PORT, TILT_PIN);
 
-// clear bit to enable input
-	bitSet(PAN_DDR, PAN_PIN);
-	bitSet(TILT_DDR, TILT_PIN);
+// set pin to enable output
+//	bitClear(PAN_DDR, PAN_PIN);
+//	bitClear(TILT_DDR, TILT_PIN);
 
     
 // enable the timer
 	TCCR1B = (1 << CS10);
-    bitSet(TIMSK1, TOIE1);
+//    bitSet(TIMSK1, TOIE1);
+    bitClear(TIMSK1, TOIE1);
     
 // enable interrupts
 	sei();
     
-//    input_state = sync_code;
-    input_state = interactive_mode;
+    input_state = sync_code0;
 
 	while(1)
 	{
