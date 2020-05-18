@@ -114,20 +114,22 @@ typedef struct
 // Limit of PWM changes
     int max_tilt_change;
     int max_pan_change;
-// Y error when head is above frame
+// Y error when head is above frame in EOS RP pixels
     int tilt_search;
+// deadband in EOS RP pixels
+    int deadband;
 } lens_t;
 
 lens_t lenses[] = 
 {
-    { 100, 100, 4, 4, 50, 50, 200 }, // 15mm
-    { 100, 100, 2, 2, 50, 50, 150 }, // 28mm
-    { 50, 50, 1, 1, 50, 50, 100 }, // 50mm
+    { 100, 100, 4, 4, 50, 50, 200, 25 }, // 15mm
+    { 100, 100, 2, 2, 50, 50, 150, 25 }, // 28mm
+    { 50,  50,  1, 1, 50, 50, 100, 25 }, // 50mm
 };
 
 
 
-// normalize the error pixels to the EOS RP preview frame sizes
+// scale the pixels in the current resolution to EOS RP pixels
 #define NORMALIZE_DISTANCE(error) (error * 576 / height)
 
 // the body parts as defined in 
@@ -303,6 +305,24 @@ int init_serial(const char *path)
 }
 
 
+void* servo_reader(void *ptr)
+{
+    printf("servo_reader %d\n", __LINE__);
+
+    while(1)
+    {
+        uint8_t buffer;
+        int bytes_read = read(servo_fd, &buffer, 1);
+        if(bytes_read <= 0)
+        {
+            printf("servo_reader %d: servos unplugged\n", __LINE__);
+            return 0;
+        }
+        printf("%c", buffer);
+        fflush(stdout);
+    }
+}
+
 int init_servos()
 {
 #ifdef __clang__
@@ -316,6 +336,11 @@ int init_servos()
 
     if(servo_fd >= 0)
     {
+        pthread_t x;
+	    pthread_create(&x, 
+		    0, 
+		    servo_reader, 
+		    0);
         return 0;
     }
     else
@@ -543,6 +568,11 @@ public:
         {
             case ESC:
             case 'q':
+// escape out of configuration
+                if(current_operation == CONFIGURING)
+                {
+                    ::save_defaults();
+                }
                 set_done(0);
                 return 1;
                 break;
@@ -1397,15 +1427,18 @@ public:
 
 
                     int x_error = total_x - center_x;
-    // printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
-    // __LINE__, (int)total_x, bodies[0].x1, bodies[0].x2, x_error, y_error);
-                    float pan_change = delta * 
-                        lenses[lens].x_gain * 
-                        NORMALIZE_DISTANCE(x_error);
-                    CLAMP(pan_change, 
-                        -lenses[lens].max_pan_change, 
-                        lenses[lens].max_pan_change);
-                    pan += pan_change * pan_sign;
+// printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
+// __LINE__, (int)total_x, bodies[0].x1, bodies[0].x2, x_error, y_error);
+                    if(NORMALIZE_DISTANCE(abs(x_error)) > lenses[lens].deadband)
+                    {
+                        float pan_change = delta * 
+                            lenses[lens].x_gain * 
+                            NORMALIZE_DISTANCE(x_error);
+                        CLAMP(pan_change, 
+                            -lenses[lens].max_pan_change, 
+                            lenses[lens].max_pan_change);
+                        pan += pan_change * pan_sign;
+                    }
 
 
 #ifdef TRACK_TILT
@@ -1467,7 +1500,7 @@ top_y);
                         y_error = -lenses[lens].tilt_search;
                     }
 
-                    if(y_error != 0)
+                    if(abs(NORMALIZE_DISTANCE(y_error)) > lenses[lens].deadband)
                     {
                         tilt_change = delta * 
                             lenses[lens].y_gain * 

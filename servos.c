@@ -156,13 +156,6 @@ void make_pwm_table()
     new_table_size = i;
     have_new_table = 1;
     
-    if(!pwm_started)
-    {
-        pwm_started = 1;
-// enable the timer
-        bitSet(TIMSK1, TOIE1);
-    }
-        
     
 //     for(i = 0; i < new_table_size; i++)
 //     {
@@ -189,6 +182,15 @@ void get_pwm()
         pan = buffer[0] | (((uint16_t)buffer[1]) << 8);
         tilt = buffer[2] | (((uint16_t)buffer[3]) << 8);
         
+//print_text("get_pwm\n");
+        if(!pwm_started)
+        {
+//print_text("starting PWM\n");
+            pwm_started = 1;
+    // enable the timer
+            bitSet(TIMSK1, TOIE1);
+        }
+
         make_pwm_table();
     }
 }
@@ -197,6 +199,7 @@ void sync_code3()
 {
     if(uart_in == SYNC_CODE3)
     {
+//print_text("sync_code3\n");
         input_state = get_pwm;
         counter = 0;
     }
@@ -215,6 +218,7 @@ void sync_code2()
 {
     if(uart_in == SYNC_CODE2)
     {
+//print_text("sync_code2\n");
         input_state = sync_code3;
     }
     else
@@ -232,6 +236,7 @@ void sync_code1()
 {
     if(uart_in == SYNC_CODE1)
     {
+//print_text("sync_code1\n");
         input_state = sync_code2;
     }
     else
@@ -249,6 +254,7 @@ void sync_code0()
 {
     if(uart_in == SYNC_CODE0)
     {
+//print_text("sync_code0\n");
         input_state = sync_code1;
     }
 }
