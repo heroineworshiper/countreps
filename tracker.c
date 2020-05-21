@@ -237,9 +237,9 @@ static int frames = 0;
 static int current_operation = STARTUP;
 static int have_time1 = 0;
 
-
+// hard coded for testing on a bigger monitor
 #define WINDOW_W 1920
-#define WINDOW_H 1040
+#define WINDOW_H 1080
 #define MARGIN 10
 
 
@@ -551,6 +551,10 @@ public:
 		1, // hide
         BLACK) // bg_color
     {
+printf("GUI::GUI %d %d %d\n", 
+__LINE__, 
+BC_DisplayInfo::left_border,
+BC_DisplayInfo::top_border);
     };
 
 	int close_event()
