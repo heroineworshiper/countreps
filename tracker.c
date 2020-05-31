@@ -65,19 +65,21 @@
 //#define LOAD_TEST_INPUT
 // load frames from DSLR
 //#define LOAD_GPHOTO2
-// use a webcam as input
+// load frames from a webcam
 //#define LOAD_WEBCAM
 // use HDMI capture as input
 #define LOAD_HDMI
-    #define HDMI_PATH "/dev/video1"
-    #define HDMI_W 1920
-    #define HDMI_H 1080
-    #define HDMI_BUFFERS 2
+// not supported.  Slows framerate to 5fps
+//    #define RECORD_HDMI
+
 
 // save openpose output in test_output
-#define SAVE_OUTPUT
+//#define SAVE_OUTPUT
 // output photos go here
-#define OUTPATH "test_output"
+    #define OUTPATH "test_output"
+// save openpose output in an mp4 file
+#define SAVE_OUTPUT2
+    #define OUTPATH2 "output.mp4"
 
 // tilt tracking is optional
 #define TRACK_TILT
@@ -176,6 +178,8 @@ lens_t lenses[] =
 #define TOTAL_ZONES 4
 #define HEAD_ZONE 0
 #define NECK_ZONE 1
+#define HIP_ZONE 2
+#define FOOT_ZONE 3
 
 static int zone0[] = {
     MODEL_REYE,
@@ -241,6 +245,7 @@ static int landscape = 1;
 
 static int servo_fd = -1;
 static int frames = 0;
+static FILE *ffmpeg_fd = 0;
 
 #define STARTUP 0
 #define CONFIGURING 1
@@ -822,11 +827,15 @@ void draw_video(unsigned char *src,
         for(int i = 0; i < dst_w; i++)
         {
             nearest_x[i] = i * src_w / dst_w;
+            CLAMP(nearest_x[i], 0, src_w - 1);
         }
+        
         for(int i = 0; i < dst_h; i++)
         {
             nearest_y[i] = i * src_h / dst_h;
+            CLAMP(nearest_y[i], 0, src_h - 1);
         }
+        
         for(int i = 0; i < dst_h; i++)
         {
             unsigned char *src_row = src + nearest_y[i] * src_rowspan;
@@ -974,16 +983,22 @@ printf("InputBase::initialize %d\n", __LINE__);
 // raw_image.rows);
                 if(raw_image.cols > 0 && raw_image.rows > 0)
                 {
-// openpose only handles right side up lions
                     if(landscape)
                     {
                         datumPtr->cvInputData = raw_image;
                     }
                     else
                     {
+// openpose only handles right side up lions, so portrait mode must be rotated
                         cv::Mat rotated;
 
-                        cv::rotate(raw_image, 
+// portrait mode is only for photos, so crop to 3:2
+                        int crop_w = raw_image.rows * 3 / 2;
+                        int crop_x = raw_image.cols / 2 - crop_w / 2;
+                        cv::Rect cropping(crop_x, 0, crop_w, raw_image.rows);
+                        
+
+                        cv::rotate(raw_image(cropping), 
                             rotated,
                             cv::RotateFlags::ROTATE_90_COUNTERCLOCKWISE);
                         datumPtr->cvInputData = rotated;
@@ -1004,9 +1019,6 @@ printf("InputBase::initialize %d\n", __LINE__);
             }
         }
 
-        struct timeval time2;
-        gettimeofday(&time2, 0);
-
 
 //         printf("GPhoto2Input %d size=%d w=%d h=%d\n", 
 //             __LINE__, 
@@ -1026,6 +1038,10 @@ int InputBase::frame_size = 0;
 pthread_mutex_t InputBase::frame_lock;
 // InputBase waits for this
 sem_t InputBase::frame_ready_sema;
+
+
+
+
 
 
 #ifdef LOAD_GPHOTO2
@@ -1188,6 +1204,19 @@ const uint8_t GPhoto2Input::stop_code[2] = { 0xff, 0xd9 };
 
 
 #ifdef LOAD_HDMI
+
+#define HDMI_PATH "/dev/video1"
+//#define HDMI_W 1920
+//#define HDMI_H 1080
+#define HDMI_W (1920 * 2)
+#define HDMI_H (1080 * 2)
+
+#ifdef RECORD_HDMI
+    #define HDMI_BUFFERS 32
+#else
+    #define HDMI_BUFFERS 2
+#endif
+
 // load frames from HDMI with rotation
 class HDMIInput : public InputBase
 {
@@ -1237,13 +1266,37 @@ public:
                     
                     v4l2_params.fmt.pix.width = HDMI_W;
                     v4l2_params.fmt.pix.height = HDMI_H;
+
+#ifdef RECORD_HDMI
+                    v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+#else
                     v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+#endif
                     if(ioctl(fd, VIDIOC_S_FMT, &v4l2_params) < 0)
                     {
                         printf("HDMIInput::reader_thread %d: VIDIOC_S_FMT failed\n",
                             __LINE__);
                     }
+
+
+//                     struct v4l2_jpegcompression jpeg_opts;
+//                     if(ioctl(fd, VIDIOC_G_JPEGCOMP, &jpeg_opts) < 0)
+//                     {
+//                         printf("HDMIInput::reader_thread %d: VIDIOC_G_JPEGCOMP failed\n",
+//                             __LINE__);
+//                     }
+//                     printf("HDMIInput::reader_thread %d: quality=%d\n",
+//                         __LINE__,
+//                         jpeg_opts.quality);
+//                     
+//                     if(ioctl(fd, VIDIOC_S_JPEGCOMP, &jpeg_opts) < 0)
+//                     {
+//                         printf("HDMIInput::reader_thread %d: VIDIOC_S_JPEGCOMP failed\n",
+//                             __LINE__);
+//                     }
                     
+
+
                     struct v4l2_requestbuffers requestbuffers;
                     requestbuffers.count = HDMI_BUFFERS;
                     requestbuffers.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -1306,6 +1359,8 @@ public:
                 {
                     printf("HDMIInput::reader_thread %d: VIDIOC_DQBUF failed\n",
                         __LINE__);
+                    close(fd);
+                    fd = -1;
                     sleep(1);
                 }
                 else
@@ -1342,6 +1397,20 @@ public:
                         printf("HDMIInput::reader_thread %d: VIDIOC_QBUF failed\n",
                             __LINE__);
                     }
+
+                    frame_count++;
+                    struct timeval time2;
+                    gettimeofday(&time2, 0);
+                    int64_t diff = TO_MS(time2) - TO_MS(time1);
+                    if(diff >= 1000)
+                    {
+//                         printf("HDMIInput::reader_thread %d FPS: %f\n",
+//                             __LINE__,
+//                             (double)frame_count * 1000 / diff);
+                        frame_count = 0;
+                        gettimeofday(&time1, 0);
+                    }
+
                 }
             }
         }
@@ -1362,165 +1431,18 @@ void quit(int sig)
 	info.c_lflag |= ICANON;
 	info.c_lflag |= ECHO;
 	tcsetattr(fileno(stdin), TCSANOW, &info);
+    
+    if(ffmpeg_fd)
+    {
+        printf("quit %d\n", __LINE__);
+        fclose(ffmpeg_fd);
+        printf("quit %d\n", __LINE__);
+    }
     exit(0);
 }
 
 
 
-// void* configure_thread(void *ptr)
-// {
-//     int result = init_servos();
-//     if(result)
-//     {
-// // don't use the camera mount
-//         processing = 1;
-//         return 0;
-//     }
-// 
-// 	struct termios term_info;
-// 	struct termios default_term_info;
-//     int in_fd = -1;
-// 	in_fd = fileno(stdin);
-// 	tcgetattr(in_fd, &default_term_info);
-// 	tcgetattr(in_fd, &term_info);
-// 	term_info.c_lflag &= ~ICANON;
-// 	term_info.c_lflag &= ~ECHO;
-// 	tcsetattr(in_fd, TCSANOW, &term_info);
-// 
-// 
-// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// // __LINE__,
-// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// // pan_sign,
-// // tilt_sign);
-// 
-//     printf("-----------------------------------------------------\n");
-//     printf("Welcome to the tracker\n");
-//     printf("Press SPACE or ENTER to activate mount\n");
-//     printf("ESC to give up & go to a movie.\n");
-//     while(1)
-//     {
-//         uint8_t c;
-//         int _ = read(in_fd, &c, 1);
-// 
-//         if(c == ' ' ||
-//             c == '\n')
-//         {
-//             break;
-//         }
-// 
-//         if(c == 27)
-//         {
-//             quit(0);
-//             break;
-//         }
-//     }
-// 
-// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// // __LINE__,
-// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// // pan_sign,
-// // tilt_sign);
-// 
-// // write it a few times to defeat UART initialization glitches
-//     write_servos(1);
-//     usleep(100000);
-//     write_servos(1);
-//     usleep(100000);
-//     write_servos(1);
-//     usleep(100000);
-//     write_servos(1);
-// 
-// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// // __LINE__,
-// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// // pan_sign,
-// // tilt_sign);
-// 
-//     printf("-----------------------------------------------------\n");
-//     printf("Press keys to aim mount.\n");
-//     printf("PWM Values should be as close to 0 as possible.\n");
-//     printf("a - left\n");
-//     printf("d - right\n");
-//     printf("w - up\n");
-//     printf("s - down\n");
-//     printf("p - reverse pan sign\n");
-//     printf("t - reverse tilt sign\n");
-//     printf("SPACE or ENTER to save defaults & begin tracking\n");
-//     printf("ESC to give up & go to a movie.\n");
-//     int done = 0;
-//     while(!done)
-//     {
-//         uint8_t c;
-//         int print_servos = 0;
-//         int _ = read(in_fd, &c, 1);
-// 
-//         switch(c)
-//         {
-//             case 27:
-//                 save_defaults();
-//                 quit(0);
-//                 break;
-// 
-//             case ' ':
-//             case '\n':
-//                 printf("\nBeginning tracking\n");
-//                 done = 1;
-//                 break;
-//             case 'a':
-//                 pan -= PAN_STEP * pan_sign;
-//                 write_servos(1);
-//                 print_servos = 1;
-//                 break;
-//             case 'd':
-//                 pan += PAN_STEP * pan_sign;
-//                 write_servos(1);
-//                 print_servos = 1;
-//                 break;
-//             case 's':
-//                 tilt -= TILT_STEP * tilt_sign;
-//                 write_servos(1);
-//                 print_servos = 1;
-//                 break;
-//             case 'w':
-//                 tilt += TILT_STEP * tilt_sign;
-//                 write_servos(1);
-//                 print_servos = 1;
-//                 break;
-//             case 't':
-//                 tilt_sign *= -1;
-//                 print_servos = 1;
-//                 break;
-//             case 'p':
-//                 pan_sign *= -1;
-//                 print_servos = 1;
-//                 break;
-//         }
-// 
-//         if(print_servos)
-//         {
-//             printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d       \r", 
-//                 __LINE__,
-//                 (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-//                 (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-//                 pan_sign,
-//                 tilt_sign);
-//             fflush(stdout);
-//         }
-//     }
-// 
-// 	tcsetattr(in_fd, TCSANOW, &default_term_info);
-//     close(in_fd);
-// 
-//     start_pan = pan;
-//     start_tilt = tilt;
-//     save_defaults();
-// 
-//     processing = 1;
-// }
 
 
 
@@ -1532,10 +1454,9 @@ public:
     void initializationOnThread() 
     {
         clock_gettime(CLOCK_MONOTONIC, &time1);
-        
     }
-   
-    
+
+
     void reset_zone(zone_t *zone, int *parts)
     {
         zone->min_y = 0;
@@ -1543,10 +1464,11 @@ public:
         zone->total = 0;
         zone->parts = parts;
     }
-    
+
     int calculate_error(int current_x, int want_x, int deadband)
     {
         return current_x - want_x;
+
 //         if(current_x > want_x + deadband)
 //         {
 //             return current_x - (want_x + deadband);
@@ -1727,45 +1649,50 @@ public:
                 int height = image.rows;
                 int center_x = width / 2;
                 int center_y = height / 2;
-                int biggest_body = 0;
-                int biggest_h = 0;
+                int largest = 0;
                 zone_t zones[TOTAL_ZONES];
+// size of highest head
                 int head_size = 0;
+                bzero(zones, sizeof(zone_t) * TOTAL_ZONES);
 
+// fuse all bodies
                 for(int human = 0; human < humans; human++)
                 {
                     body_t *body = &bodies[human];
-// average center X of all bodies
-                    total_x += (body->x1 + body->x2) / 2;
 
-// use the tallest body for vertical measurements
-                    if(body->y2 - body->y1 > biggest_h)
+// average center of all bodies
+                    total_x += (body->x1 + body->x2) / 2;
+                    total_y += (body->y1 + body->y2) / 2;
+
+
+// get minimum head Y & size of head with minimum Y
+                    if(body->zones[HEAD_ZONE].total &&
+                        (!zones[HEAD_ZONE].total ||
+                            body->zones[HEAD_ZONE].min_y < zones[HEAD_ZONE].min_y))
                     {
-                        biggest_body = human;
-                        biggest_h = body->y2 - body->y1;
-                        total_y += (body->y1 + body->y2) / 2;
                         head_size = body->head_size;
-                        for(int i = 0; i < TOTAL_ZONES; i++)
-                        {
-                            memcpy(&zones[i], &body->zones[i], sizeof(zone_t));
-                        }
+                        zones[HEAD_ZONE].min_y = body->zones[HEAD_ZONE].min_y;
+                    }
+
+
+// accumulate total of all zones
+                    for(int i = 0; i < TOTAL_ZONES; i++)
+                    {
+                        zones[i].total += body->zones[i].total;
                     }
                 }
 
 
-// convert to EOS RP frame size
-                head_size = NORMALIZE(head_size);
-
                 if(humans > 0)
                 {
+// average coords of all bodies
                     total_x /= humans;
+                    total_y /= humans;
 
-
+// track horizontal avg of all bodies
                     int x_error = calculate_error(total_x, 
                         center_x, 
                         UNNORMALIZE(lenses[lens].deadband));
-// printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
-// __LINE__, (int)total_x, bodies[0].x1, bodies[0].x2, x_error, y_error);
                     if(NORMALIZE(abs(x_error)) > lenses[lens].deadband)
                     {
                         float pan_change = delta * 
@@ -1779,13 +1706,14 @@ public:
 
 
 #ifdef TRACK_TILT
-// top_y depends on the head size
-                    int top_y = height / 8;
-                    int top_y1 = top_y;
+// range of top_y
+                    int top_y1 = height / 8;
+                    int top_y = top_y1;
                     int top_y2 = height / 3;
-// EOS RP frame sizes
-                    int head_size1 = 150;
-                    int head_size2 = 250;
+
+// range of head size
+                    int head_size1 = UNNORMALIZE(150);
+                    int head_size2 = UNNORMALIZE(250);
                     if(head_size >= head_size1 && head_size < head_size2)
                     {
                         double fraction = (double)(head_size - head_size1) / 
@@ -1800,25 +1728,24 @@ public:
                     }
 printf("Process: workConsumer %d: head_size=%d top_y=%d\n", 
 __LINE__, 
-head_size,
+NORMALIZE(head_size),
 top_y);
                 
                     int y_error = 0;
                     float tilt_change = 0;
-// all zones visible.  Track the center or the head.
-                    if(zones[0].total > 0 &&
-                        zones[1].total > 0 &&
-                        zones[2].total > 0 &&
-                        zones[3].total > 0)
+// head & foot zones visible.  Track the center or the head.
+                    if(zones[HEAD_ZONE].total > 0 &&
+                        zones[FOOT_ZONE].total > 0)
                     {
-// limit the head
-                        if(zones[0].min_y < top_y)
+// head is too high.  track the head
+                        if(zones[HEAD_ZONE].min_y < top_y)
                         {
-                            y_error = calculate_error(zones[0].min_y, 
+                            y_error = calculate_error(zones[HEAD_ZONE].min_y, 
                                 top_y, 
                                 UNNORMALIZE(lenses[lens].deadband));
                         }
                         else
+// track the center of the body
                         {
                             y_error = calculate_error(total_y, 
                                 center_y, 
@@ -1827,23 +1754,37 @@ top_y);
 
                     }
                     else
-    // head is visible but other zones are hidden.  Track the head.
-                    if(zones[0].total > 0)
+// head is visible but feet are hidden.  Track the head.
+                    if(zones[HEAD_ZONE].total > 0)
                     {
-                        y_error = calculate_error(zones[0].min_y, 
-                            top_y, 
-                            UNNORMALIZE(lenses[lens].deadband));
+// assume the body is too big to fit in frame, 
+// so track the minimum y of any head.
+//                        if(biggest_h > height / 2)
+                        {
+                            y_error = calculate_error(zones[HEAD_ZONE].min_y, 
+                                top_y, 
+                                UNNORMALIZE(lenses[lens].deadband));
+                        }
+//                         else
+//                         {
+// // assume the body is obstructed by the foreground but would fit in frame, 
+// // so center it.  This is vulnerable to glitches if the body is too close.
+//                             y_error = calculate_error(total_y, 
+//                                 center_y, 
+//                                 UNNORMALIZE(lenses[lens].deadband));
+//                         }
                     }
-    // other zones are visible but head is hidden.  Tilt up.
+// other zones are visible but head is hidden.  Tilt up.
                     else
-                    if(zones[1].total > 0 ||
-                        zones[2].total > 0 ||
-                        zones[3].total > 0)
+                    if(zones[NECK_ZONE].total > 0 ||
+                        zones[HIP_ZONE].total > 0 ||
+                        zones[FOOT_ZONE].total > 0)
                     {
-                        y_error = -lenses[lens].tilt_search;
+                        y_error = -UNNORMALIZE(lenses[lens].tilt_search);
                     }
 
-                    if(abs(NORMALIZE(y_error)) > lenses[lens].deadband)
+// apply the Y error to the servo
+                    if(abs(y_error) > UNNORMALIZE(lenses[lens].deadband))
                     {
                         tilt_change = delta * 
                             lenses[lens].y_gain * 
@@ -1853,7 +1794,7 @@ top_y);
                             lenses[lens].max_tilt_change);
                         tilt -= tilt_change * tilt_sign;
                     }
-    #endif // TRACK_TILT
+#endif // TRACK_TILT
 
 //                printf("pan_change=%d tilt_change=%d\n", (int)pan_change, (int)tilt_change);
 //                    printf("pan=%d tilt=%d\n", (int)(pan - start_pan), (int)(tilt - start_tilt));
@@ -1875,6 +1816,7 @@ top_y);
                 int dst_w;
                 int dst_h;
 
+// show video during configuration
                 if(image.rows > image.cols)
                 {
                     dst_h = WINDOW_H;
@@ -1901,6 +1843,7 @@ top_y);
             }
             else
             {
+// show video during tracking
                 int dst_w;
                 int dst_h;
 
@@ -1924,6 +1867,38 @@ top_y);
                     image.rows,
                     image.cols * 3);
             }
+
+#ifdef SAVE_OUTPUT2
+            if(!ffmpeg_fd)
+            {
+                char string[TEXTLEN];
+                sprintf(string, 
+                    "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 15 -s:v %dx%d -i - -c:v mpeg4 -vb 5000k -an %s", 
+                    image.cols,
+                    image.rows,
+                    OUTPATH2);
+                printf("Process::workConsumer %d: %s\n",
+                    __LINE__,
+                    string);
+                ffmpeg_fd = popen(string, "w");
+//                ffmpeg_fd = fopen(OUTPATH2, "w");
+                if(!ffmpeg_fd)
+                {
+                    printf("Process::workConsumer %d: failed to run ffmpeg\n",
+                        __LINE__);
+                    sleep(1);
+                }
+                
+            }
+
+            if(ffmpeg_fd)
+            {
+                fwrite((unsigned char*)image.ptr(0),
+                    1,
+                    image.cols * image.rows * 3,
+                    ffmpeg_fd);
+            }
+#endif // SAVE_OUTPUT2
 
         }
         
