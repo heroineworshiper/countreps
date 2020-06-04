@@ -115,34 +115,45 @@
 
 typedef struct
 {
-// manual step
+// manual PWM step
     int pan_step;
     int tilt_step;
-// PID gain
+// PID gain converts a percent into a PWM step
     float x_gain;
     float y_gain;
 // Limit of PWM changes
     int max_tilt_change;
     int max_pan_change;
-// Y error when head is above frame in EOS RP pixels
-    int tilt_search;
-// deadband in EOS RP pixels
-    int deadband;
+// Fixed Y error when head is above frame in percent
+    float tilt_search;
+// deadband in percent
+    float deadband;
 } lens_t;
 
 lens_t lenses[] = 
 {
-    { 100, 100, 4, 4, 50, 50, 200, 25 }, // 15mm
-    { 100, 100, 2, 2, 50, 50, 150, 25 }, // 28mm
-    { 50,  50,  1, 1, 50, 50, 100, 25 }, // 50mm
+    { 100, 100, 25,   25, 50, 50, 35, 4 }, // 15mm
+    { 100, 100, 12,   12, 50, 50, 25, 4 }, // 28mm
+    { 50,  50,  6,     6, 50, 50, 17, 4 }, // 50mm
 };
 
+// where to put the head based on head size (percentages of height)
+#define TOP_Y1 13
+#define HEAD_SIZE1 26
+
+#define TOP_Y2 0
+#define HEAD_SIZE2 43
+
+// scale from pixels to percent
+#define TO_PERCENT_Y(y) ((y) * 100 / height)
+#define TO_PERCENT_X(x) ((x) * 100 / width)
+// scale from percent to pixels
+#define FROM_PERCENT_Y(y) ((y) * height / 100)
+#define FROM_PERCENT_X(x) ((x) * width / 100)
 
 
-// scale the pixels in the current resolution to EOS RP pixels
-#define NORMALIZE(x) (x * 576 / height)
-// scale the pixels from EOS RP pixels to the current resolution
-#define UNNORMALIZE(x) (x * height / 576)
+//#define NORMALIZE(x) (x * 576 / height)
+//#define UNNORMALIZE(x) (x * height / 576)
 
 // the body parts as defined in 
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -1465,7 +1476,8 @@ public:
         zone->parts = parts;
     }
 
-    int calculate_error(int current_x, int want_x, int deadband)
+//    int calculate_error(int current_x, int want_x, int deadband)
+    int calculate_error(int current_x, int want_x)
     {
         return current_x - want_x;
 
@@ -1617,10 +1629,18 @@ public:
                             }
                         }
 
-// get the head size from the zones
+
+// get the head size from the head zones
                         if(body->zones[NECK_ZONE].total &&
                             body->zones[HEAD_ZONE].total)
                         {
+// expand head by 1/3 since openpose only detects eyes
+// assume the head is vertical
+                            int h = body->zones[NECK_ZONE].max_y -
+                                body->zones[HEAD_ZONE].min_y;
+                            body->y1 -= h / 2;
+                            body->zones[HEAD_ZONE].min_y -= h / 2;
+                            
                             body->head_size = body->zones[NECK_ZONE].max_y -
                                 body->zones[HEAD_ZONE].min_y;
                         }
@@ -1691,13 +1711,12 @@ public:
 
 // track horizontal avg of all bodies
                     int x_error = calculate_error(total_x, 
-                        center_x, 
-                        UNNORMALIZE(lenses[lens].deadband));
-                    if(NORMALIZE(abs(x_error)) > lenses[lens].deadband)
+                        center_x);
+                    if(TO_PERCENT_X(abs(x_error)) > lenses[lens].deadband)
                     {
                         float pan_change = delta * 
                             lenses[lens].x_gain * 
-                            NORMALIZE(x_error);
+                            TO_PERCENT_X(x_error);
                         CLAMP(pan_change, 
                             -lenses[lens].max_pan_change, 
                             lenses[lens].max_pan_change);
@@ -1706,31 +1725,34 @@ public:
 
 
 #ifdef TRACK_TILT
-// range of top_y
-                    int top_y1 = height / 8;
-                    int top_y = top_y1;
-                    int top_y2 = height / 3;
+                    int top_y = 0;
+// // range of top_y based on head size
+//                     int top_y1 = FROM_PERCENT_Y(TOP_Y1);
+//                     int top_y2 = FROM_PERCENT_Y(TOP_Y2);
+// 
+// // range of head size
+//                     int head_size1 = FROM_PERCENT_Y(HEAD_SIZE1);
+//                     int head_size2 = FROM_PERCENT_Y(HEAD_SIZE2);
+// 
+//                     if(head_size >= head_size1 && head_size < head_size2)
+//                     {
+//                         double fraction = (double)(head_size - head_size1) / 
+//                             (head_size2 - head_size1);
+//                         top_y = (int)(fraction * top_y2 + 
+//                             (1.0 - fraction) * top_y1);
+//                     }
+//                     else
+//                     if(head_size >= head_size2)
+//                     {
+//                         top_y = top_y2;
+//                     }
+// printf("Process: workConsumer %d: head_size=%d top_y=%d\n", 
+// __LINE__, 
+// TO_PERCENT_Y(head_size),
+// top_y);
 
-// range of head size
-                    int head_size1 = UNNORMALIZE(150);
-                    int head_size2 = UNNORMALIZE(250);
-                    if(head_size >= head_size1 && head_size < head_size2)
-                    {
-                        double fraction = (double)(head_size - head_size1) / 
-                            (head_size2 - head_size1);
-                        top_y = (int)(fraction * top_y2 + 
-                            (1.0 - fraction) * top_y1);
-                    }
-                    else
-                    if(head_size >= head_size2)
-                    {
-                        top_y = top_y2;
-                    }
-printf("Process: workConsumer %d: head_size=%d top_y=%d\n", 
-__LINE__, 
-NORMALIZE(head_size),
-top_y);
-                
+
+
                     int y_error = 0;
                     float tilt_change = 0;
 // head & foot zones visible.  Track the center or the head.
@@ -1741,15 +1763,13 @@ top_y);
                         if(zones[HEAD_ZONE].min_y < top_y)
                         {
                             y_error = calculate_error(zones[HEAD_ZONE].min_y, 
-                                top_y, 
-                                UNNORMALIZE(lenses[lens].deadband));
+                                top_y);
                         }
                         else
 // track the center of the body
                         {
                             y_error = calculate_error(total_y, 
-                                center_y, 
-                                UNNORMALIZE(lenses[lens].deadband));
+                                center_y);
                         }
 
                     }
@@ -1762,16 +1782,14 @@ top_y);
 //                        if(biggest_h > height / 2)
                         {
                             y_error = calculate_error(zones[HEAD_ZONE].min_y, 
-                                top_y, 
-                                UNNORMALIZE(lenses[lens].deadband));
+                                top_y);
                         }
 //                         else
 //                         {
 // // assume the body is obstructed by the foreground but would fit in frame, 
 // // so center it.  This is vulnerable to glitches if the body is too close.
 //                             y_error = calculate_error(total_y, 
-//                                 center_y, 
-//                                 UNNORMALIZE(lenses[lens].deadband));
+//                                 center_y);
 //                         }
                     }
 // other zones are visible but head is hidden.  Tilt up.
@@ -1780,15 +1798,15 @@ top_y);
                         zones[HIP_ZONE].total > 0 ||
                         zones[FOOT_ZONE].total > 0)
                     {
-                        y_error = -UNNORMALIZE(lenses[lens].tilt_search);
+                        y_error = -FROM_PERCENT_Y(lenses[lens].tilt_search);
                     }
 
 // apply the Y error to the servo
-                    if(abs(y_error) > UNNORMALIZE(lenses[lens].deadband))
+                    if(abs(y_error) > FROM_PERCENT_Y(lenses[lens].deadband))
                     {
                         tilt_change = delta * 
                             lenses[lens].y_gain * 
-                            NORMALIZE(y_error);
+                            TO_PERCENT_Y(y_error);
                         CLAMP(tilt_change, 
                             -lenses[lens].max_tilt_change, 
                             lenses[lens].max_tilt_change);
@@ -1858,6 +1876,7 @@ top_y);
                     dst_h = dst_w * image.rows / image.cols;
                 }
 
+
                 draw_video((unsigned char*)image.ptr(0), 
                     WINDOW_W / 2 - dst_w / 2,
                     0,
@@ -1866,40 +1885,45 @@ top_y);
                     image.cols,
                     image.rows,
                     image.cols * 3);
-            }
 
+
+
+// record output during tracking only.  Can't change frame size while recording.
 #ifdef SAVE_OUTPUT2
-            if(!ffmpeg_fd)
-            {
-                char string[TEXTLEN];
-                sprintf(string, 
-                    "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 15 -s:v %dx%d -i - -c:v mpeg4 -vb 5000k -an %s", 
-                    image.cols,
-                    image.rows,
-                    OUTPATH2);
-                printf("Process::workConsumer %d: %s\n",
-                    __LINE__,
-                    string);
-                ffmpeg_fd = popen(string, "w");
-//                ffmpeg_fd = fopen(OUTPATH2, "w");
                 if(!ffmpeg_fd)
                 {
-                    printf("Process::workConsumer %d: failed to run ffmpeg\n",
-                        __LINE__);
-                    sleep(1);
-                }
-                
-            }
+                    char string[TEXTLEN];
+                    sprintf(string, 
+                        "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 15 -s:v %dx%d -i - -c:v mpeg4 -vb 5000k -an %s", 
+                        image.cols,
+                        image.rows,
+                        OUTPATH2);
+                    printf("Process::workConsumer %d: %s\n",
+                        __LINE__,
+                        string);
+                    ffmpeg_fd = popen(string, "w");
+    //                ffmpeg_fd = fopen(OUTPATH2, "w");
+                    if(!ffmpeg_fd)
+                    {
+                        printf("Process::workConsumer %d: failed to run ffmpeg\n",
+                            __LINE__);
+                        sleep(1);
+                    }
 
-            if(ffmpeg_fd)
-            {
-                fwrite((unsigned char*)image.ptr(0),
-                    1,
-                    image.cols * image.rows * 3,
-                    ffmpeg_fd);
-            }
+                }
+
+                if(ffmpeg_fd)
+                {
+                    fwrite((unsigned char*)image.ptr(0),
+                        1,
+                        image.cols * image.rows * 3,
+                        ffmpeg_fd);
+                }
 #endif // SAVE_OUTPUT2
 
+
+
+            }
         }
         
         
