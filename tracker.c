@@ -128,21 +128,23 @@ typedef struct
     float tilt_search;
 // deadband in percent
     float deadband;
+// top_y in percent
+    float top_y;
 } lens_t;
 
 lens_t lenses[] = 
 {
-    { 100, 100, 25,   25, 50, 50, 35, 4 }, // 15mm
-    { 100, 100, 12,   12, 50, 50, 25, 4 }, // 28mm
-    { 50,  50,  6,     6, 50, 50, 17, 4 }, // 50mm
+    { 100, 100, 25,   25, 50, 50, 35, 4, 5 }, // 15mm
+    { 100, 100, 12,   12, 50, 50, 25, 4, 10 }, // 28mm
+    { 50,  50,  6,     6, 50, 50, 17, 4, 20 }, // 50mm
 };
 
 // where to put the head based on head size (percentages of height)
-#define TOP_Y1 13
-#define HEAD_SIZE1 26
-
-#define TOP_Y2 0
-#define HEAD_SIZE2 43
+// #define TOP_Y1 13
+// #define HEAD_SIZE1 26
+// 
+// #define TOP_Y2 0
+// #define HEAD_SIZE2 43
 
 // scale from pixels to percent
 #define TO_PERCENT_Y(y) ((y) * 100 / height)
@@ -1725,9 +1727,10 @@ public:
 
 
 #ifdef TRACK_TILT
-                    int top_y = 0;
+                    int top_y = FROM_PERCENT_Y(lenses[lens].top_y);
 // // range of top_y based on head size
 //                     int top_y1 = FROM_PERCENT_Y(TOP_Y1);
+//                     int top_y = top_y1;
 //                     int top_y2 = FROM_PERCENT_Y(TOP_Y2);
 // 
 // // range of head size
