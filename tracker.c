@@ -135,8 +135,8 @@ typedef struct
 lens_t lenses[] = 
 {
     { 100, 100, 25,   25, 50, 50, 35, 4, 5 }, // 15mm
-    { 100, 100, 12,   12, 50, 50, 25, 4, 10 }, // 28mm
-    { 50,  50,  6,     6, 50, 50, 17, 4, 20 }, // 50mm
+    { 100, 100, 12,   12, 50, 50, 25, 4, 5 }, // 28mm
+    { 50,  50,  6,     6, 50, 50, 17, 4, 5 }, // 50mm
 };
 
 // where to put the head based on head size (percentages of height)
