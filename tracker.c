@@ -558,7 +558,7 @@ const char* lens_to_text(int lens)
     switch(lens)
     {
         case LENS_15:
-            return "15MM Fish";
+            return "15-17MM";
             break;
         case LENS_28:
             return "28MM";
@@ -616,7 +616,12 @@ public:
     {
         char string[BCTEXTLEN];
         sprintf(string, 
-            "PAN=%d\nTILT=%d\nPAN_SIGN=%d\nTILT_SIGN=%d\nLENS=%s\nROTATION=%s", 
+            "PAN (a,d) = %d\n"
+            "TILT (w,s) = %d\n"
+            "PAN_SIGN (p) = %d\n"
+            "TILT_SIGN (t) = %d\n"
+            "LENS (l) = %s\n"
+            "ROTATION (r) = %s", 
             (int)(pan - (MAX_PWM + MIN_PWM) / 2),
             (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
             pan_sign,
@@ -625,7 +630,7 @@ public:
             landscape_to_text(landscape));
         int line_h = get_text_height(LARGEFONT, "0");
         int text_h = get_text_height(LARGEFONT, string);
-        int text_w = get_text_width(LARGEFONT, "ROTATION=LANDSCAPE");
+        int text_w = get_text_width(LARGEFONT, "ROTATION (r) = LANDSCAPE");
         int text_x = MARGIN;
         int text_y = line_h + text_y2;
         clear_box(text_x, text_y - line_h, text_w, text_h);
@@ -673,14 +678,14 @@ public:
                         "Press keys to aim the mount.\n\n"
                         "PWM Values should be as\n"
                         "close to 0 as possible.\n"
-                        "a - left\n"
-                        "d - right\n"
-                        "w - up\n"
-                        "s - down\n"
-                        "t - invert tilt sign\n"
-                        "p - invert pan sign\n"
-                        "l - change lens\n"
-                        "r - rotate the camera\n"
+//                         "a - left\n"
+//                         "d - right\n"
+//                         "w - up\n"
+//                         "s - down\n"
+//                         "t - invert tilt sign\n"
+//                         "p - invert pan sign\n"
+//                         "l - change lens\n"
+//                         "r - rotate the camera\n"
                         "SPACE or ENTER to save defaults & \n"
                         "begin tracking\n"
                         "ESC to give up & go to a movie.");
