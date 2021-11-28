@@ -50,10 +50,12 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <semaphore.h>
 #include <signal.h>
+#include <linux/videodev2.h>
 
 #include "guicast.h"
 #include "keys.h"
@@ -62,28 +64,59 @@
 // load frames from test_input
 //#define LOAD_TEST_INPUT
 // load frames from DSLR
-#define LOAD_GPHOTO2
-// use a webcam as input
+//#define LOAD_GPHOTO2
+// load frames from a webcam
 //#define LOAD_WEBCAM
+// use HDMI capture as input
+#define LOAD_HDMI
+// not supported.  Slows framerate to 5fps
+//    #define RECORD_HDMI
+
+// type of servo board
+//#define USE_ATMEGA // atmega at 16Mhz
+#define USE_PIC // 18f14k50 at 48Mhz
+
+
+
+
 
 // save openpose output in test_output
-#define SAVE_OUTPUT
+//#define SAVE_OUTPUT
 // output photos go here
-#define OUTPATH "test_output"
+    #define OUTPATH "test_output"
+// save openpose output in an mp4 file
+#define SAVE_OUTPUT2
+    #define OUTPATH2 "output.mp4"
 
 // tilt tracking is optional
 #define TRACK_TILT
 
 // maximum humans to track
-#define MAX_HUMANS 1
+#define MAX_HUMANS 2
 
+#ifdef USE_ATMEGA
 // PWM limits
-#define MIN_PWM 1000
-#define MAX_PWM 32700
+    #define MIN_PWM 1000 
+    #define MAX_PWM 32700
+// PWM allowed beyond starting point for tracking
+    #define TILT_MAG 1500
+    #define PAN_MAG 5000
+// starting values
+    #define PAN0 18676
+    #define TILT0 21076
+#endif
 
-// PWM limits beyond starting point for tracking
-#define TILT_MAG 1500
-#define PAN_MAG 5000
+#ifdef USE_PIC
+    #define MIN_PWM 733
+    #define MAX_PWM 24000 
+    #define TILT_MAG 1100
+    #define PAN_MAG 3700
+    #define PAN0 14007
+    #define TILT0 15807
+#endif
+
+
+
 
 #ifdef __clang__
 #define MODELS "../openpose.mac/models/"
@@ -105,30 +138,53 @@
 
 typedef struct
 {
-// manual step
+// manual PWM step
     int pan_step;
     int tilt_step;
-// PID gain
+// PID gain converts a percent into a PWM step
     float x_gain;
     float y_gain;
 // Limit of PWM changes
     int max_tilt_change;
     int max_pan_change;
-// Y error when head is above frame
-    int tilt_search;
+// Fixed Y error when head is above frame in percent
+    float tilt_search;
+// deadband in percent
+    float deadband;
+// top_y in percent
+    float top_y;
 } lens_t;
 
 lens_t lenses[] = 
 {
-    { 100, 100, 4, 4, 50, 50, 200 }, // 15mm
-    { 100, 100, 2, 2, 50, 50, 150 }, // 28mm
-    { 50, 50, 1, 1, 50, 50, 100 }, // 50mm
+#ifdef USE_ATMEGA
+    { 100, 100, 25,   25, 50, 50, 35, 4, 5 }, // 15mm
+    { 100, 100, 12,   12, 50, 50, 25, 4, 5 }, // 28mm
+    { 50,  50,  6,     6, 50, 50, 17, 4, 5 }, // 50mm
+#endif
+
+#ifdef USE_PIC
+    { 75,  75, 18,   18, 38, 38, 35, 4, 5 }, // 15mm
+    { 75,  75,  9,    9, 38, 38, 25, 4, 5 }, // 28mm
+    { 38,  38,  5,    5, 38, 38, 17, 4, 5 }, // 50mm
+#endif
+
 };
 
+// where to put the head based on head size (percentages of height)
+// #define TOP_Y1 13
+// #define HEAD_SIZE1 26
+// 
+// #define TOP_Y2 0
+// #define HEAD_SIZE2 43
 
+// scale from pixels to percent of screen size
+#define TO_PERCENT_Y(y) ((y) * 100 / height)
+#define TO_PERCENT_X(x) ((x) * 100 / width)
+// scale from percent of screen size to pixels
+#define FROM_PERCENT_Y(y) ((y) * height / 100)
+#define FROM_PERCENT_X(x) ((x) * width / 100)
 
-// normalize the error pixels to the EOS RP preview frame sizes
-#define NORMALIZE_DISTANCE(error) (error * 576 / height)
 
 // the body parts as defined in 
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -164,6 +220,8 @@ lens_t lenses[] =
 #define TOTAL_ZONES 4
 #define HEAD_ZONE 0
 #define NECK_ZONE 1
+#define HIP_ZONE 2
+#define FOOT_ZONE 3
 
 static int zone0[] = {
     MODEL_REYE,
@@ -218,16 +276,19 @@ typedef struct
 
 static body_t bodies[MAX_HUMANS];
 
-static float pan = 18676;
-static float tilt = 21076;
+// raw PWM values
+static float pan = PAN0;
+static float tilt = TILT0;
 static float start_pan = pan;
 static float start_tilt = tilt;
 static int pan_sign = 1;
 static int tilt_sign = 1;
 static int lens = LENS_15;
+static int landscape = 1;
 
 static int servo_fd = -1;
 static int frames = 0;
+static FILE *ffmpeg_fd = 0;
 
 #define STARTUP 0
 #define CONFIGURING 1
@@ -235,9 +296,9 @@ static int frames = 0;
 static int current_operation = STARTUP;
 static int have_time1 = 0;
 
-
+// hard coded for testing on a bigger monitor
 #define WINDOW_W 1920
-#define WINDOW_H 1040
+#define WINDOW_H 1080
 #define MARGIN 10
 
 
@@ -303,19 +364,51 @@ int init_serial(const char *path)
 }
 
 
+void* servo_reader(void *ptr)
+{
+    printf("servo_reader %d\n", __LINE__);
+
+    while(1)
+    {
+        uint8_t buffer;
+        int bytes_read = read(servo_fd, &buffer, 1);
+        if(bytes_read <= 0)
+        {
+            printf("servo_reader %d: servos unplugged\n", __LINE__);
+            return 0;
+        }
+        printf("%c", buffer);
+        fflush(stdout);
+    }
+}
+
 int init_servos()
 {
 #ifdef __clang__
     servo_fd = init_serial("/dev/cu.usbserial-AL03OO1F");
 #else
+#ifdef USE_ATMEGA
 	servo_fd = init_serial("/dev/ttyUSB0");
 	if(servo_fd < 0) servo_fd = init_serial("/dev/ttyUSB1");
 	if(servo_fd < 0) servo_fd = init_serial("/dev/ttyUSB2");
 #endif
 
+#ifdef USE_PIC
+	servo_fd = init_serial("/dev/ttyACM0");
+	if(servo_fd < 0) servo_fd = init_serial("/dev/ttyACM1");
+	if(servo_fd < 0) servo_fd = init_serial("/dev/ttyACM2");
+#endif
+
+#endif
+
 
     if(servo_fd >= 0)
     {
+        pthread_t x;
+	    pthread_create(&x, 
+		    0, 
+		    servo_reader, 
+		    0);
         return 0;
     }
     else
@@ -328,8 +421,11 @@ void write_servos(int use_pwm_limits)
 {
 	if(servo_fd >= 0)
 	{
-#define SYNC_CODE 0xe5
-#define BUFFER_SIZE 5
+#define SYNC_CODE0 0xff
+#define SYNC_CODE1 0x2d
+#define SYNC_CODE2 0xd4
+#define SYNC_CODE3 0xe5
+#define BUFFER_SIZE 8
 
 // limits are absolute PWM limits
         if(use_pwm_limits)
@@ -347,11 +443,14 @@ void write_servos(int use_pwm_limits)
         uint16_t pan_i = (uint16_t)pan;
         uint16_t tilt_i = (uint16_t)tilt;
 		char buffer[BUFFER_SIZE];
-        buffer[0] = SYNC_CODE;
-        buffer[1] = pan_i;
-        buffer[2] = pan_i >> 8;
-        buffer[3] = tilt_i;
-        buffer[4] = tilt_i >> 8;
+        buffer[0] = SYNC_CODE0;
+        buffer[1] = SYNC_CODE1;
+        buffer[2] = SYNC_CODE2;
+        buffer[3] = SYNC_CODE3;
+        buffer[4] = pan_i;
+        buffer[5] = pan_i >> 8;
+        buffer[6] = tilt_i;
+        buffer[7] = tilt_i >> 8;
 
 //printf("write_servos %d %d %d\n", __LINE__, pan_i,  tilt_i);
 		int temp = write(servo_fd, buffer, BUFFER_SIZE);
@@ -458,8 +557,13 @@ void load_defaults()
         {
             lens = atoi(value);
         }        
+        else
+        if(!strcasecmp(key, "LANDSCAPE"))
+        {
+            landscape = atoi(value);
+        }        
     }
-    
+
     fclose(fd);
 }
 
@@ -469,7 +573,7 @@ void save_defaults()
     char string[TEXTLEN];
     sprintf(string, "%s/.tracker.rc", home);
     FILE *fd = fopen(string, "w");
-    
+
     if(!fd)
     {
         printf("save_defaults %d: Couldn't open %s for writing\n", 
@@ -477,13 +581,14 @@ void save_defaults()
             string);
         return;
     }
-    
+
     fprintf(fd, "PAN %d\n", (int)pan);
     fprintf(fd, "TILT %d\n", (int)tilt);
     fprintf(fd, "PAN_SIGN %d\n", pan_sign);
     fprintf(fd, "TILT_SIGN %d\n", tilt_sign);
     fprintf(fd, "LENS %d\n", lens);
-    
+    fprintf(fd, "LANDSCAPE %d\n", landscape);
+
     fclose(fd);
 }
 
@@ -492,22 +597,40 @@ const char* lens_to_text(int lens)
     switch(lens)
     {
         case LENS_15:
-            return "15mm";
+            return "15-17MM";
             break;
         case LENS_28:
-            return "28mm";
+            return "28MM";
             break;
         case LENS_50:
-            return "50mm";
+            return "50MM";
             break;
         default:
-            return "Unknown";
+            return "UNKNOWN";
+    }
+}
+
+const char* landscape_to_text(int landscape)
+{
+    if(landscape)
+    {
+        return "LANDSCAPE";
+    }
+    else
+    {
+        return "PORTRAIT";
     }
 }
 
 class GUI : public BC_Window
 {
 public:
+    int text_y2;
+// width for the video window
+    int reserved_w = WINDOW_W * 3 / 4;
+    int need_clear_video;
+
+
     GUI() : BC_Window("Tracker",
         0, // x
 		0, // y
@@ -528,6 +651,38 @@ public:
 		return 1;
 	};
     
+    void print_values(int flash_it)
+    {
+        char string[BCTEXTLEN];
+        sprintf(string, 
+            "PAN (a,d) = %d\n"
+            "TILT (w,s) = %d\n"
+            "PAN_SIGN (p) = %d\n"
+            "TILT_SIGN (t) = %d\n"
+            "LENS (l) = %s\n"
+            "ROTATION (r) = %s", 
+            (int)(pan - (MAX_PWM + MIN_PWM) / 2),
+            (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
+            pan_sign,
+            tilt_sign,
+            lens_to_text(lens),
+            landscape_to_text(landscape));
+        int line_h = get_text_height(LARGEFONT, "0");
+        int text_h = get_text_height(LARGEFONT, string);
+        int text_w = get_text_width(LARGEFONT, "ROTATION (r) = LANDSCAPE");
+        int text_x = MARGIN;
+        int text_y = line_h + text_y2;
+        clear_box(text_x, text_y - line_h, text_w, text_h);
+        set_color(WHITE);
+        draw_text(text_x, 
+            text_y, 
+            string);
+        if(flash_it)
+        {
+            flash(text_x, text_y - line_h, text_w, text_h, 1);
+        }
+    }
+    
     int keypress_event()
     {
 //        printf("GUI::keypress_event %d %c\n", __LINE__, get_keypress());
@@ -537,6 +692,11 @@ public:
         {
             case ESC:
             case 'q':
+// escape out of configuration
+                if(current_operation == CONFIGURING)
+                {
+                    ::save_defaults();
+                }
                 set_done(0);
                 return 1;
                 break;
@@ -555,15 +715,25 @@ public:
                     char string[BCTEXTLEN];
                     sprintf(string,
                         "Press keys to aim the mount.\n\n"
-                        "PWM Values should be as close to 0 as possible.\n"
-                        "a - left   d - right   w - up   s - down\n"
-                        "t - invert tilt sign   p - invert pan sign\n"
-                        "l - change lens\n"
-                        "SPACE or ENTER to save defaults & begin tracking\n"
+                        "PWM Values should be as\n"
+                        "close to 0 as possible.\n"
+//                         "a - left\n"
+//                         "d - right\n"
+//                         "w - up\n"
+//                         "s - down\n"
+//                         "t - invert tilt sign\n"
+//                         "p - invert pan sign\n"
+//                         "l - change lens\n"
+//                         "r - rotate the camera\n"
+                        "SPACE or ENTER to save defaults & \n"
+                        "begin tracking\n"
                         "ESC to give up & go to a movie.");
                     draw_text(x, 
                         y, 
                         string);
+                    text_y2 = y + get_text_height(LARGEFONT, string) + text_h;
+                    
+                    print_values(0);
                     flash(1);
                     
 // write it a few times to defeat UART initialization glitches
@@ -574,8 +744,6 @@ public:
                     write_servos(1);
                     usleep(100000);
                     write_servos(1);
-                    
-                    need_print_values = 1;
                 }
                 else
                 if(current_operation == CONFIGURING)
@@ -622,6 +790,12 @@ public:
                 pan_sign *= -1;
                 need_print_values = 1;
                 break;
+            
+            case 'r':
+                landscape = !landscape;
+                need_print_values = 1;
+                need_clear_video = 1;
+                break;
            
             case 'l':
                 lens++;
@@ -635,25 +809,7 @@ public:
         
         if(need_print_values && current_operation == CONFIGURING)
         {
-            char string[BCTEXTLEN];
-            sprintf(string, 
-                "PAN=%d\nTILT=%d\nPAN_SIGN=%d\nTILT_SIGN=%d\nLENS=%s", 
-                (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-                (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-                pan_sign,
-                tilt_sign,
-                lens_to_text(lens));
-            int line_h = get_text_height(LARGEFONT, "0");
-            int text_h = get_text_height(LARGEFONT, string);
-            int text_w = get_text_width(LARGEFONT, string);
-            int text_x = WINDOW_W - MARGIN - text_w;
-            int text_y = line_h + MARGIN;
-            clear_box(text_x, text_y - line_h, text_w, text_h);
-            set_color(WHITE);
-            draw_text(text_x, 
-                text_y, 
-                string);
-            flash(text_x, text_y - line_h, text_w, text_h, 1);
+            print_values(1);
         }
         
         if(need_write_servos)
@@ -690,6 +846,8 @@ static BC_Bitmap *gui_bitmap = 0;
 void init_gui()
 {
     gui = new GUI();
+    gui->reposition_window(-gui->get_resources()->get_left_border(),
+        -gui->get_resources()->get_top_border());
     gui_bitmap = new BC_Bitmap(gui, 
 	    WINDOW_W,
 	    WINDOW_H,
@@ -714,34 +872,83 @@ void draw_video(unsigned char *src,
     int src_rowspan)
 {
     unsigned char **dst_rows = gui_bitmap->get_row_pointers();
-
-// draw the video
     int nearest_x[dst_w];
     int nearest_y[dst_h];
-    for(int i = 0; i < dst_w; i++)
+
+
+// draw the video
+    if(landscape || 1)
     {
-        nearest_x[i] = i * src_w / dst_w;
-    }
-    for(int i = 0; i < dst_h; i++)
-    {
-        nearest_y[i] = i * src_h / dst_h;
-    }
-    
-    for(int i = 0; i < dst_h; i++)
-    {
-        unsigned char *src_row = src + nearest_y[i] * src_rowspan;
-        unsigned char *dst_row = dst_rows[i];
-        for(int j = 0; j < dst_w; j++)
+//printf("draw_video %d dst_w=%d dst_h=%d src_w=%d src_h=%d\n",
+//__LINE__, dst_w, dst_h, src_w, src_h);
+        for(int i = 0; i < dst_w; i++)
         {
-            int src_x = nearest_x[j];
-            *dst_row++ = src_row[src_x * 3 + 0];
-            *dst_row++ = src_row[src_x * 3 + 1];
-            *dst_row++ = src_row[src_x * 3 + 2];
-            dst_row++;
+            nearest_x[i] = i * src_w / dst_w;
+            CLAMP(nearest_x[i], 0, src_w - 1);
         }
-    }    
+        
+        for(int i = 0; i < dst_h; i++)
+        {
+            nearest_y[i] = i * src_h / dst_h;
+            CLAMP(nearest_y[i], 0, src_h - 1);
+        }
+        
+        for(int i = 0; i < dst_h; i++)
+        {
+            unsigned char *src_row = src + nearest_y[i] * src_rowspan;
+            unsigned char *dst_row = dst_rows[i];
+            for(int j = 0; j < dst_w; j++)
+            {
+                int src_x = nearest_x[j];
+                *dst_row++ = src_row[src_x * 3 + 0];
+                *dst_row++ = src_row[src_x * 3 + 1];
+                *dst_row++ = src_row[src_x * 3 + 2];
+                dst_row++;
+            }
+        }
+    }
+    else
+    {
+        for(int i = 0; i < dst_w; i++)
+        {
+            nearest_x[i] = i * src_h / dst_w;
+        }
+        for(int i = 0; i < dst_h; i++)
+        {
+            nearest_y[i] = i * src_w / dst_h;
+        }
+        for(int i = 0; i < dst_h; i++)
+        {
+            unsigned char *src_col = src + nearest_y[dst_h - i - 1] * 3;
+            unsigned char *dst_row = dst_rows[i];
+            for(int j = 0; j < dst_w; j++)
+            {
+                int src_y = nearest_y[j];
+                *dst_row++ = src_col[src_y * src_rowspan + 0];
+                *dst_row++ = src_col[src_y * src_rowspan + 1];
+                *dst_row++ = src_col[src_y * src_rowspan + 2];
+                dst_row++;
+            }
+        }
+    }
 
     gui->lock_window();
+    if(gui->need_clear_video)
+    {
+// printf("draw_video %d x=%d y=%d w=%d h=%d\n",
+// __LINE__,
+// WINDOW_W - gui->reserved_w,
+// 0,
+// gui->reserved_w,
+// WINDOW_H);
+        gui->clear_box(WINDOW_W - gui->reserved_w,
+            0, 
+            gui->reserved_w,
+            WINDOW_H);
+        gui->flash(0);
+        gui->need_clear_video = 0;
+    }
+
     gui->draw_bitmap(gui_bitmap, 
 	    1,
 	    dst_x, // dst coords
@@ -757,25 +964,152 @@ void draw_video(unsigned char *src,
 
 
 
+// base class for video importers
+class InputBase : public op::WorkerProducer<std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>>
+{
+public:
+    static int initialized;
+    static int frame_count;
+#define BUFSIZE2 0x400000
+// compressed frame from the hardware
+    static unsigned char reader_buffer3[BUFSIZE2];
+// size of the frame in reader_buffer3
+    static int frame_size;
+    static pthread_mutex_t frame_lock;
+// workProducer waits for this
+    static sem_t frame_ready_sema;
+
+
+    static void* entrypoint(void *ptr)
+    {
+        InputBase *thread = (InputBase*)ptr;
+        thread->reader_thread();
+    }
+
+    virtual void reader_thread()
+    {
+    }
+
+    void initialize()
+    {
+	    pthread_mutexattr_t attr;
+	    pthread_mutexattr_init(&attr);
+	    pthread_mutex_init(&frame_lock, &attr);
+        sem_init(&frame_ready_sema, 0, 0);
+
+printf("InputBase::initialize %d\n", __LINE__);
+	    pthread_t reader_tid;
+	    pthread_create(&reader_tid, 
+		    0, 
+		    entrypoint, 
+		    this);
+printf("InputBase::initialize %d\n", __LINE__);
+
+        initialized = 1;
+    }
+
+
+
+    std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>> workProducer()
+    {
+
+        if(!initialized)
+        {
+            initialize();
+        }
+
+// Create new datum
+        auto datumsPtr = std::make_shared<std::vector<std::shared_ptr<op::Datum>>>();
+        datumsPtr->emplace_back();
+        auto& datumPtr = datumsPtr->at(0);
+        datumPtr = std::make_shared<op::Datum>();
+        int frame_size2;
+
+        while(1)
+        {
+            sem_wait(&frame_ready_sema);
+            pthread_mutex_lock(&frame_lock);
+            frame_size2 = frame_size;
+            if(frame_size2 > 0)
+            {
+                cv::Mat rawData(1, frame_size, CV_8UC1, (void*)reader_buffer3);
+                cv::Mat raw_image = imdecode(rawData, cv::IMREAD_COLOR);
+// printf("InputBase::workProducer %d w=%d h=%d\n", 
+// __LINE__, 
+// raw_image.cols, 
+// raw_image.rows);
+                if(raw_image.cols > 0 && raw_image.rows > 0)
+                {
+                    if(landscape)
+                    {
+                        datumPtr->cvInputData = raw_image;
+                    }
+                    else
+                    {
+// openpose only handles right side up lions, so portrait mode must be rotated
+                        cv::Mat rotated;
+
+// portrait mode is only for photos, so crop to 3:2
+                        int crop_w = raw_image.rows * 3 / 2;
+                        int crop_x = raw_image.cols / 2 - crop_w / 2;
+                        cv::Rect cropping(crop_x, 0, crop_w, raw_image.rows);
+                        
+
+                        cv::rotate(raw_image(cropping), 
+                            rotated,
+                            cv::RotateFlags::ROTATE_90_COUNTERCLOCKWISE);
+                        datumPtr->cvInputData = rotated;
+                    }
+                }
+                else
+                {
+// try again
+                    frame_size2 = 0;
+                }
+// invalidate the image for the next workProducer call
+                frame_size = 0;
+            }
+            pthread_mutex_unlock(&frame_lock);
+            if(frame_size2 > 0)
+            {
+                break;
+            }
+        }
+
+
+//         printf("GPhoto2Input %d size=%d w=%d h=%d\n", 
+//             __LINE__, 
+//             frame_size2,
+//             datumPtr->cvInputData.cols, 
+//             datumPtr->cvInputData.rows);
+
+        return datumsPtr;
+    }
+};
+
+
+int InputBase::initialized = 0;
+int InputBase::frame_count = 0;
+unsigned char InputBase::reader_buffer3[BUFSIZE2];
+int InputBase::frame_size = 0;
+pthread_mutex_t InputBase::frame_lock;
+// InputBase waits for this
+sem_t InputBase::frame_ready_sema;
+
 
 
 
 
 
 #ifdef LOAD_GPHOTO2
-// read frames from the cam
-class FrameInput : public op::WorkerProducer<std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>>
+// read frames from cam's USB previewer with rotation
+class GPhoto2Input : public InputBase
 {
 public:
-    static int initialized;
-    static int frame_count;
-    static FILE *fd;
+    FILE *fd;
 #define BUFSIZE1 0x100
-#define BUFSIZE2 0x400000
-    static unsigned char reader_buffer1[BUFSIZE1];
-    static unsigned char reader_buffer2[BUFSIZE2];
-    static unsigned char reader_buffer3[BUFSIZE2];
-    static int frame_size;
+    unsigned char reader_buffer1[BUFSIZE1];
+    unsigned char reader_buffer2[BUFSIZE2];
 #define GET_START_CODE 0
 #define GET_STOP_CODE 1
     static int reader_state;
@@ -783,30 +1117,29 @@ public:
     static const uint8_t stop_code[2];
     static int code_offset;
     static int output_offset;
-    static pthread_mutex_t frame_lock;
-// FrameInput waits for this
-    static sem_t frame_ready_sema;
 
-
-    void initializationOnThread() {}
+    void initializationOnThread() 
+    {
+        fd = 0;
+    }
 
 // read frames from gphoto2
-    static void* reader_thread(void *ptr)
+    void reader_thread()
     {
         struct timeval time1;
         gettimeofday(&time1, 0);
 
-        printf("FrameInput::reader_thread %d\n", __LINE__);
+        printf("GPhoto2Input::reader_thread %d\n", __LINE__);
         while(1)
         {
             if(!fd)
             {
-                printf("FrameInput::workProducer %d running gphoto2\n", __LINE__);
+                printf("GPhoto2Input::workProducer %d running gphoto2\n", __LINE__);
 // Run gphoto2
                 fd = popen("gphoto2 --stdout --capture-movie", "r");
                 if(!fd)
                 {
-                    printf("FrameInput::workProducer %d: failed to run gphoto2\n",
+                    printf("GPhoto2Input::workProducer %d: failed to run gphoto2\n",
                         __LINE__);
                     sleep(1);
                 }
@@ -818,14 +1151,14 @@ public:
                 bytes_read = fread(reader_buffer1, 1, BUFSIZE1, fd);
                 if(bytes_read <= 0)
                 {
-                    printf("FrameInput::reader_thread %d disconnected\n", __LINE__);
+                    printf("GPhoto2Input::reader_thread %d disconnected\n", __LINE__);
                     fclose(fd);
                     fd = 0;
                     sleep(1);
                 }
             }
             
-//             printf("FrameInput::reader_thread %d got %d bytes %02x %02x %02x %02x\n", 
+//             printf("GPhoto2Input::reader_thread %d got %d bytes %02x %02x %02x %02x\n", 
 //                 __LINE__, 
 //                 bytes_read,
 //                 reader_buffer1[0],
@@ -872,7 +1205,7 @@ public:
                             if(code_offset >= sizeof(stop_code))
                             {
 // got complete frame
-//                                 printf("FrameInput::reader_thread %d got frame %d bytes\n", 
+//                                 printf("GPhoto2Input::reader_thread %d got frame %d bytes\n", 
 //                                     __LINE__,
 //                                     output_offset);
 
@@ -888,7 +1221,7 @@ public:
                                 int64_t diff = TO_MS(time2) - TO_MS(time1);
                                 if(diff >= 1000)
                                 {
-//                                     printf("FrameInput::reader_thread %d FPS: %f\n",
+//                                     printf("GPhoto2Input::reader_thread %d FPS: %f\n",
 //                                         __LINE__,
 //                                         (double)frame_count * 1000 / diff);
                                     frame_count = 0;
@@ -912,90 +1245,236 @@ public:
             }
         }
     }
-
-    std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>> workProducer()
-    {
-
-        if(!initialized)
-        {
-// select the USB cam with our hack to cap_avfoundation_mac.mm
-//            cap = cv::VideoCapture(1);
-
-	        pthread_mutexattr_t attr;
-	        pthread_mutexattr_init(&attr);
-	        pthread_mutex_init(&frame_lock, &attr);
-            sem_init(&frame_ready_sema, 0, 0);
-
-	        pthread_t reader_tid;
-	        pthread_create(&reader_tid, 
-		        0, 
-		        reader_thread, 
-		        0);
-
-            initialized = 1;
-//printf("FrameInput::workProducer %d\n", __LINE__);
-//sleep(1000000);
-        }
-
-// Create new datum
-        auto datumsPtr = std::make_shared<std::vector<std::shared_ptr<op::Datum>>>();
-        datumsPtr->emplace_back();
-        auto& datumPtr = datumsPtr->at(0);
-        datumPtr = std::make_shared<op::Datum>();
-        int frame_size2;
-
-        while(1)
-        {
-            sem_wait(&frame_ready_sema);
-            pthread_mutex_lock(&frame_lock);
-            frame_size2 = frame_size;
-            if(frame_size2 > 0)
-            {
-                cv::Mat rawData(1, frame_size, CV_8UC1, (void*)reader_buffer3);
-                datumPtr->cvInputData = imdecode(rawData, cv::IMREAD_COLOR);
-                frame_size = 0;
-            }
-            pthread_mutex_unlock(&frame_lock);
-            if(frame_size2 > 0)
-            {
-                break;
-            }
-        }
-
-        struct timeval time2;
-        gettimeofday(&time2, 0);
-
-
-//         printf("FrameInput %d size=%d w=%d h=%d\n", 
-//             __LINE__, 
-//             frame_size2,
-//             datumPtr->cvInputData.cols, 
-//             datumPtr->cvInputData.rows);
-
-        return datumsPtr;
-    }
 };
 
-int FrameInput::initialized = 0;
-int FrameInput::frame_count = 0;
-FILE* FrameInput::fd = 0;
-int FrameInput::reader_state = GET_START_CODE;
-int FrameInput::code_offset = 0;
-int FrameInput::output_offset = 0;
-const uint8_t FrameInput::start_code[4] = { 0xff, 0xd8, 0xff, 0xdb };
-const uint8_t FrameInput::stop_code[2] = { 0xff, 0xd9 };
-unsigned char FrameInput::reader_buffer1[BUFSIZE1];
-unsigned char FrameInput::reader_buffer2[BUFSIZE2];
-unsigned char FrameInput::reader_buffer3[BUFSIZE2];
-int FrameInput::frame_size = 0;
-pthread_mutex_t FrameInput::frame_lock;
-// FrameInput waits for this
-sem_t FrameInput::frame_ready_sema;
+int GPhoto2Input::reader_state = GET_START_CODE;
+int GPhoto2Input::code_offset = 0;
+int GPhoto2Input::output_offset = 0;
+const uint8_t GPhoto2Input::start_code[4] = { 0xff, 0xd8, 0xff, 0xdb };
+const uint8_t GPhoto2Input::stop_code[2] = { 0xff, 0xd9 };
+
 
 #endif // LOAD_GPHOTO2
 
 
 
+
+
+#ifdef LOAD_HDMI
+
+#define HDMI_PATH "/dev/video1"
+//#define HDMI_W 1920
+//#define HDMI_H 1080
+#define HDMI_W (1920 * 2)
+#define HDMI_H (1080 * 2)
+
+#ifdef RECORD_HDMI
+    #define HDMI_BUFFERS 32
+#else
+    #define HDMI_BUFFERS 2
+#endif
+
+// load frames from HDMI with rotation
+class HDMIInput : public InputBase
+{
+public:
+    int fd;
+    unsigned char *mmap_buffer[HDMI_BUFFERS];
+
+    void initializationOnThread() 
+    {
+        fd = -1;
+    }
+
+// read frames from gphoto2
+    void reader_thread()
+    {
+        struct timeval time1;
+        gettimeofday(&time1, 0);
+
+        printf("GPhoto2Input::reader_thread %d\n", __LINE__);
+        while(1)
+        {
+            if(fd < 0)
+            {
+                printf("HDMIInput::reader_thread %d opening video4linux\n", __LINE__);
+
+                fd = open(HDMI_PATH, O_RDWR);
+                if(fd < 0)
+                {
+                    printf("HDMIInput::reader_thread %d: failed to open %s\n",
+                        __LINE__,
+                        HDMI_PATH);
+                    sleep(1);
+                }
+                else
+                {
+                    struct v4l2_format v4l2_params;
+                    v4l2_params.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                    ioctl(fd, VIDIOC_G_FMT, &v4l2_params);
+//                     printf("HDMIInput::reader_thread %d: default format=%c%c%c%c w=%d h=%d\n",
+//                         __LINE__,
+//                         v4l2_params.fmt.pix.pixelformat & 0xff,
+//                         (v4l2_params.fmt.pix.pixelformat >> 8) & 0xff,
+//                         (v4l2_params.fmt.pix.pixelformat >> 16) & 0xff,
+//                         (v4l2_params.fmt.pix.pixelformat >> 24) & 0xff,
+//                         v4l2_params.fmt.pix.width,
+//                         v4l2_params.fmt.pix.height);
+                    
+                    v4l2_params.fmt.pix.width = HDMI_W;
+                    v4l2_params.fmt.pix.height = HDMI_H;
+
+#ifdef RECORD_HDMI
+                    v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+#else
+                    v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+#endif
+                    if(ioctl(fd, VIDIOC_S_FMT, &v4l2_params) < 0)
+                    {
+                        printf("HDMIInput::reader_thread %d: VIDIOC_S_FMT failed\n",
+                            __LINE__);
+                    }
+
+
+//                     struct v4l2_jpegcompression jpeg_opts;
+//                     if(ioctl(fd, VIDIOC_G_JPEGCOMP, &jpeg_opts) < 0)
+//                     {
+//                         printf("HDMIInput::reader_thread %d: VIDIOC_G_JPEGCOMP failed\n",
+//                             __LINE__);
+//                     }
+//                     printf("HDMIInput::reader_thread %d: quality=%d\n",
+//                         __LINE__,
+//                         jpeg_opts.quality);
+//                     
+//                     if(ioctl(fd, VIDIOC_S_JPEGCOMP, &jpeg_opts) < 0)
+//                     {
+//                         printf("HDMIInput::reader_thread %d: VIDIOC_S_JPEGCOMP failed\n",
+//                             __LINE__);
+//                     }
+                    
+
+
+                    struct v4l2_requestbuffers requestbuffers;
+                    requestbuffers.count = HDMI_BUFFERS;
+                    requestbuffers.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                    requestbuffers.memory = V4L2_MEMORY_MMAP;
+                    if(ioctl(fd, VIDIOC_REQBUFS, &requestbuffers) < 0)
+                    {
+                        printf("HDMIInput::reader_thread %d: VIDIOC_REQBUFS failed\n",
+                            __LINE__);
+                    }
+                    else
+                    {
+                        for(int i = 0; i < HDMI_BUFFERS; i++)
+                        {
+                            struct v4l2_buffer buffer;
+                            buffer.type = requestbuffers.type;
+                            buffer.index = i;
+                            
+                            if(ioctl(fd, VIDIOC_QUERYBUF, &buffer) < 0)
+				            {
+					            printf("HDMIInput::reader_thread %d: VIDIOC_QUERYBUF failed\n",
+                                    __LINE__);
+				            }
+                            else
+                            {
+                                mmap_buffer[i] = (unsigned char*)mmap(NULL,
+					                buffer.length,
+					                PROT_READ | PROT_WRITE,
+					                MAP_SHARED,
+					                fd,
+					                buffer.m.offset);
+                                printf("HDMIInput::reader_thread %d: allocated buffer size=%d\n",
+                                    __LINE__,
+                                    buffer.length);
+                                if(ioctl(fd, VIDIOC_QBUF, &buffer) < 0)
+                                {
+                                    printf("HDMIInput::reader_thread %d: VIDIOC_QBUF failed\n",
+                                        __LINE__);
+                                }
+                            }
+                        }
+                    }
+                    
+                    int streamon_arg = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	                if(ioctl(fd, VIDIOC_STREAMON, &streamon_arg) < 0)
+                    {
+		                printf("HDMIInput::reader_thread %d: VIDIOC_STREAMON failed\n",
+                            __LINE__);
+                    }
+                }
+            }
+
+
+            if(fd >= 0)
+            {
+                struct v4l2_buffer buffer;
+		        bzero(&buffer, sizeof(buffer));
+                buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		        buffer.memory = V4L2_MEMORY_MMAP;
+                if(ioctl(fd, VIDIOC_DQBUF, &buffer) < 0)
+                {
+                    printf("HDMIInput::reader_thread %d: VIDIOC_DQBUF failed\n",
+                        __LINE__);
+                    close(fd);
+                    fd = -1;
+                    sleep(1);
+                }
+                else
+                {
+                    unsigned char *ptr = mmap_buffer[buffer.index];
+//                     printf("HDMIInput::reader_thread %d: index=%d size=%d %02x %02x %02x %02x %02x %02x %02x %02x\n",
+//                         __LINE__,
+//                         buffer.index,
+//                         buffer.bytesused,
+//                         ptr[0],
+//                         ptr[1],
+//                         ptr[2],
+//                         ptr[3],
+//                         ptr[4],
+//                         ptr[5],
+//                         ptr[6],
+//                         ptr[7]);
+
+                    if(ptr[0] == 0xff && 
+                        ptr[1] == 0xd8 && 
+                        ptr[2] == 0xff && 
+                        ptr[3] == 0xdb)
+                    {
+// send it to openpose
+                        pthread_mutex_lock(&frame_lock);
+                        memcpy(reader_buffer3, ptr, buffer.bytesused);
+                        frame_size = buffer.bytesused;
+                        pthread_mutex_unlock(&frame_lock);
+                        sem_post(&frame_ready_sema);
+                    }
+
+                    if(ioctl(fd, VIDIOC_QBUF, &buffer) < 0)
+                    {
+                        printf("HDMIInput::reader_thread %d: VIDIOC_QBUF failed\n",
+                            __LINE__);
+                    }
+
+                    frame_count++;
+                    struct timeval time2;
+                    gettimeofday(&time2, 0);
+                    int64_t diff = TO_MS(time2) - TO_MS(time1);
+                    if(diff >= 1000)
+                    {
+//                         printf("HDMIInput::reader_thread %d FPS: %f\n",
+//                             __LINE__,
+//                             (double)frame_count * 1000 / diff);
+                        frame_count = 0;
+                        gettimeofday(&time1, 0);
+                    }
+
+                }
+            }
+        }
+    }
+};
+
+#endif // LOAD_HDMI
 
 
 
@@ -1009,165 +1488,18 @@ void quit(int sig)
 	info.c_lflag |= ICANON;
 	info.c_lflag |= ECHO;
 	tcsetattr(fileno(stdin), TCSANOW, &info);
+    
+    if(ffmpeg_fd)
+    {
+        printf("quit %d\n", __LINE__);
+        fclose(ffmpeg_fd);
+        printf("quit %d\n", __LINE__);
+    }
     exit(0);
 }
 
 
 
-// void* configure_thread(void *ptr)
-// {
-//     int result = init_servos();
-//     if(result)
-//     {
-// // don't use the camera mount
-//         processing = 1;
-//         return 0;
-//     }
-// 
-// 	struct termios term_info;
-// 	struct termios default_term_info;
-//     int in_fd = -1;
-// 	in_fd = fileno(stdin);
-// 	tcgetattr(in_fd, &default_term_info);
-// 	tcgetattr(in_fd, &term_info);
-// 	term_info.c_lflag &= ~ICANON;
-// 	term_info.c_lflag &= ~ECHO;
-// 	tcsetattr(in_fd, TCSANOW, &term_info);
-// 
-// 
-// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// // __LINE__,
-// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// // pan_sign,
-// // tilt_sign);
-// 
-//     printf("-----------------------------------------------------\n");
-//     printf("Welcome to the tracker\n");
-//     printf("Press SPACE or ENTER to activate mount\n");
-//     printf("ESC to give up & go to a movie.\n");
-//     while(1)
-//     {
-//         uint8_t c;
-//         int _ = read(in_fd, &c, 1);
-// 
-//         if(c == ' ' ||
-//             c == '\n')
-//         {
-//             break;
-//         }
-// 
-//         if(c == 27)
-//         {
-//             quit(0);
-//             break;
-//         }
-//     }
-// 
-// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// // __LINE__,
-// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// // pan_sign,
-// // tilt_sign);
-// 
-// // write it a few times to defeat UART initialization glitches
-//     write_servos(1);
-//     usleep(100000);
-//     write_servos(1);
-//     usleep(100000);
-//     write_servos(1);
-//     usleep(100000);
-//     write_servos(1);
-// 
-// // printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d\n", 
-// // __LINE__,
-// // (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-// // (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-// // pan_sign,
-// // tilt_sign);
-// 
-//     printf("-----------------------------------------------------\n");
-//     printf("Press keys to aim mount.\n");
-//     printf("PWM Values should be as close to 0 as possible.\n");
-//     printf("a - left\n");
-//     printf("d - right\n");
-//     printf("w - up\n");
-//     printf("s - down\n");
-//     printf("p - reverse pan sign\n");
-//     printf("t - reverse tilt sign\n");
-//     printf("SPACE or ENTER to save defaults & begin tracking\n");
-//     printf("ESC to give up & go to a movie.\n");
-//     int done = 0;
-//     while(!done)
-//     {
-//         uint8_t c;
-//         int print_servos = 0;
-//         int _ = read(in_fd, &c, 1);
-// 
-//         switch(c)
-//         {
-//             case 27:
-//                 save_defaults();
-//                 quit(0);
-//                 break;
-// 
-//             case ' ':
-//             case '\n':
-//                 printf("\nBeginning tracking\n");
-//                 done = 1;
-//                 break;
-//             case 'a':
-//                 pan -= PAN_STEP * pan_sign;
-//                 write_servos(1);
-//                 print_servos = 1;
-//                 break;
-//             case 'd':
-//                 pan += PAN_STEP * pan_sign;
-//                 write_servos(1);
-//                 print_servos = 1;
-//                 break;
-//             case 's':
-//                 tilt -= TILT_STEP * tilt_sign;
-//                 write_servos(1);
-//                 print_servos = 1;
-//                 break;
-//             case 'w':
-//                 tilt += TILT_STEP * tilt_sign;
-//                 write_servos(1);
-//                 print_servos = 1;
-//                 break;
-//             case 't':
-//                 tilt_sign *= -1;
-//                 print_servos = 1;
-//                 break;
-//             case 'p':
-//                 pan_sign *= -1;
-//                 print_servos = 1;
-//                 break;
-//         }
-// 
-//         if(print_servos)
-//         {
-//             printf("main %d pan=%d tilt=%d pan_sign=%d tilt_sign=%d       \r", 
-//                 __LINE__,
-//                 (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-//                 (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-//                 pan_sign,
-//                 tilt_sign);
-//             fflush(stdout);
-//         }
-//     }
-// 
-// 	tcsetattr(in_fd, TCSANOW, &default_term_info);
-//     close(in_fd);
-// 
-//     start_pan = pan;
-//     start_tilt = tilt;
-//     save_defaults();
-// 
-//     processing = 1;
-// }
 
 
 
@@ -1179,16 +1511,35 @@ public:
     void initializationOnThread() 
     {
         clock_gettime(CLOCK_MONOTONIC, &time1);
-        
     }
-   
-    
+
+
     void reset_zone(zone_t *zone, int *parts)
     {
         zone->min_y = 0;
         zone->max_y = 0;
         zone->total = 0;
         zone->parts = parts;
+    }
+
+//    int calculate_error(int current_x, int want_x, int deadband)
+    int calculate_error(int current_x, int want_x)
+    {
+        return current_x - want_x;
+
+//         if(current_x > want_x + deadband)
+//         {
+//             return current_x - (want_x + deadband);
+//         }
+//         else
+//         if(current_x < want_x - deadband)
+//         {
+//             return current_x - (want_x - deadband);
+//         }
+//         else
+//         {
+//             return 0;
+//         }
     }
 
     void update_zone(zone_t *zone, int body_part, int x, int y)
@@ -1324,10 +1675,18 @@ public:
                             }
                         }
 
-// get the head size from the zones
+
+// get the head size from the head zones
                         if(body->zones[NECK_ZONE].total &&
                             body->zones[HEAD_ZONE].total)
                         {
+// expand head by 1/3 since openpose only detects eyes
+// assume the head is vertical
+                            int h = body->zones[NECK_ZONE].max_y -
+                                body->zones[HEAD_ZONE].min_y;
+                            body->y1 -= h / 2;
+                            body->zones[HEAD_ZONE].min_y -= h / 2;
+                            
                             body->head_size = body->zones[NECK_ZONE].max_y -
                                 body->zones[HEAD_ZONE].min_y;
                         }
@@ -1356,122 +1715,151 @@ public:
                 int height = image.rows;
                 int center_x = width / 2;
                 int center_y = height / 2;
-                int biggest_body = 0;
-                int biggest_h = 0;
+                int largest = 0;
                 zone_t zones[TOTAL_ZONES];
+// size of highest head
                 int head_size = 0;
+                bzero(zones, sizeof(zone_t) * TOTAL_ZONES);
 
+// fuse all bodies
                 for(int human = 0; human < humans; human++)
                 {
                     body_t *body = &bodies[human];
-// average center X of all bodies
-                    total_x += (body->x1 + body->x2) / 2;
 
-// use the tallest body for vertical measurements
-                    if(body->y2 - body->y1 > biggest_h)
+// average center of all bodies
+                    total_x += (body->x1 + body->x2) / 2;
+                    total_y += (body->y1 + body->y2) / 2;
+
+
+// get minimum head Y & size of head with minimum Y
+                    if(body->zones[HEAD_ZONE].total &&
+                        (!zones[HEAD_ZONE].total ||
+                            body->zones[HEAD_ZONE].min_y < zones[HEAD_ZONE].min_y))
                     {
-                        biggest_body = human;
-                        biggest_h = body->y2 - body->y1;
-                        total_y += (body->y1 + body->y2) / 2;
                         head_size = body->head_size;
-                        for(int i = 0; i < TOTAL_ZONES; i++)
-                        {
-                            memcpy(&zones[i], &body->zones[i], sizeof(zone_t));
-                        }
+                        zones[HEAD_ZONE].min_y = body->zones[HEAD_ZONE].min_y;
+                    }
+
+
+// accumulate total of all zones
+                    for(int i = 0; i < TOTAL_ZONES; i++)
+                    {
+                        zones[i].total += body->zones[i].total;
                     }
                 }
 
 
-// convert to EOS RP frame size
-                head_size = NORMALIZE_DISTANCE(head_size);
-
                 if(humans > 0)
                 {
+// average coords of all bodies
                     total_x /= humans;
+                    total_y /= humans;
 
-
-                    int x_error = total_x - center_x;
-    // printf("workConsumer %d: total_x=%d x1=%d x2=%d x_error=%d y_error=%d\n", 
-    // __LINE__, (int)total_x, bodies[0].x1, bodies[0].x2, x_error, y_error);
-                    float pan_change = delta * 
-                        lenses[lens].x_gain * 
-                        NORMALIZE_DISTANCE(x_error);
-                    CLAMP(pan_change, 
-                        -lenses[lens].max_pan_change, 
-                        lenses[lens].max_pan_change);
-                    pan += pan_change * pan_sign;
+// track horizontal avg of all bodies
+                    int x_error = calculate_error(total_x, 
+                        center_x);
+                    if(TO_PERCENT_X(abs(x_error)) > lenses[lens].deadband)
+                    {
+                        float pan_change = delta * 
+                            lenses[lens].x_gain * 
+                            TO_PERCENT_X(x_error);
+                        CLAMP(pan_change, 
+                            -lenses[lens].max_pan_change, 
+                            lenses[lens].max_pan_change);
+                        pan += pan_change * pan_sign;
+                    }
 
 
 #ifdef TRACK_TILT
-// top_y depends on the head size
-                    int top_y = height / 8;
-                    int top_y1 = top_y;
-                    int top_y2 = height / 3;
-// EOS RP frame sizes
-                    int head_size1 = 150;
-                    int head_size2 = 250;
-                    if(head_size >= head_size1 && head_size < head_size2)
-                    {
-                        double fraction = (double)(head_size - head_size1) / 
-                            (head_size2 - head_size1);
-                        top_y = (int)(fraction * top_y2 + 
-                            (1.0 - fraction) * top_y1);
-                    }
-                    else
-                    if(head_size >= head_size2)
-                    {
-                        top_y = top_y2;
-                    }
-printf("Process: workConsumer %d: head_size=%d top_y=%d\n", 
-__LINE__, 
-head_size,
-top_y);
-                
+                    int top_y = FROM_PERCENT_Y(lenses[lens].top_y);
+// // range of top_y based on head size
+//                     int top_y1 = FROM_PERCENT_Y(TOP_Y1);
+//                     int top_y = top_y1;
+//                     int top_y2 = FROM_PERCENT_Y(TOP_Y2);
+// 
+// // range of head size
+//                     int head_size1 = FROM_PERCENT_Y(HEAD_SIZE1);
+//                     int head_size2 = FROM_PERCENT_Y(HEAD_SIZE2);
+// 
+//                     if(head_size >= head_size1 && head_size < head_size2)
+//                     {
+//                         double fraction = (double)(head_size - head_size1) / 
+//                             (head_size2 - head_size1);
+//                         top_y = (int)(fraction * top_y2 + 
+//                             (1.0 - fraction) * top_y1);
+//                     }
+//                     else
+//                     if(head_size >= head_size2)
+//                     {
+//                         top_y = top_y2;
+//                     }
+// printf("Process: workConsumer %d: head_size=%d top_y=%d\n", 
+// __LINE__, 
+// TO_PERCENT_Y(head_size),
+// top_y);
+
+
+
                     int y_error = 0;
                     float tilt_change = 0;
-// all zones visible.  Track the center or the head.
-                    if(zones[0].total > 0 &&
-                        zones[1].total > 0 &&
-                        zones[2].total > 0 &&
-                        zones[3].total > 0)
+// head & foot zones visible.  Track the center or the head.
+                    if(zones[HEAD_ZONE].total > 0 &&
+                        zones[FOOT_ZONE].total > 0)
                     {
-// limit the head
-                        if(zones[0].min_y < top_y)
+// head is too high.  track the head
+                        if(zones[HEAD_ZONE].min_y < top_y)
                         {
-                            y_error = zones[0].min_y - top_y;
+                            y_error = calculate_error(zones[HEAD_ZONE].min_y, 
+                                top_y);
                         }
                         else
+// track the center of the body
                         {
-                            y_error = total_y - center_y;
+                            y_error = calculate_error(total_y, 
+                                center_y);
                         }
 
                     }
                     else
-    // head is visible but other zones are hidden.  Track the head.
-                    if(zones[0].total > 0)
+// head is visible but feet are hidden.  Track the head.
+                    if(zones[HEAD_ZONE].total > 0)
                     {
-                        y_error = zones[0].min_y - top_y;
+// assume the body is too big to fit in frame, 
+// so track the minimum y of any head.
+//                        if(biggest_h > height / 2)
+                        {
+                            y_error = calculate_error(zones[HEAD_ZONE].min_y, 
+                                top_y);
+                        }
+//                         else
+//                         {
+// // assume the body is obstructed by the foreground but would fit in frame, 
+// // so center it.  This is vulnerable to glitches if the body is too close.
+//                             y_error = calculate_error(total_y, 
+//                                 center_y);
+//                         }
                     }
-    // other zones are visible but head is hidden.  Tilt up.
+// other zones are visible but head is hidden.  Tilt up.
                     else
-                    if(zones[1].total > 0 ||
-                        zones[2].total > 0 ||
-                        zones[3].total > 0)
+                    if(zones[NECK_ZONE].total > 0 ||
+                        zones[HIP_ZONE].total > 0 ||
+                        zones[FOOT_ZONE].total > 0)
                     {
-                        y_error = -lenses[lens].tilt_search;
+                        y_error = -FROM_PERCENT_Y(lenses[lens].tilt_search);
                     }
 
-                    if(y_error != 0)
+// apply the Y error to the servo
+                    if(abs(y_error) > FROM_PERCENT_Y(lenses[lens].deadband))
                     {
                         tilt_change = delta * 
                             lenses[lens].y_gain * 
-                            NORMALIZE_DISTANCE(y_error);
+                            TO_PERCENT_Y(y_error);
                         CLAMP(tilt_change, 
                             -lenses[lens].max_tilt_change, 
                             lenses[lens].max_tilt_change);
                         tilt -= tilt_change * tilt_sign;
                     }
-    #endif // TRACK_TILT
+#endif // TRACK_TILT
 
 //                printf("pan_change=%d tilt_change=%d\n", (int)pan_change, (int)tilt_change);
 //                    printf("pan=%d tilt=%d\n", (int)(pan - start_pan), (int)(tilt - start_tilt));
@@ -1488,11 +1876,30 @@ top_y);
             if(current_operation == CONFIGURING ||
                 current_operation == STARTUP)
             {
-                int dst_h = WINDOW_H * 3 / 4;
-                int dst_w = dst_h * image.cols / image.rows;
+                int dst_x;
+                int dst_y;
+                int dst_w;
+                int dst_h;
+
+// show video during configuration
+                if(image.rows > image.cols)
+                {
+                    dst_h = WINDOW_H;
+                    dst_w = dst_h * image.cols / image.rows;
+                    dst_x = WINDOW_W - gui->reserved_w / 2 - dst_w / 2;
+                    dst_y = 0;
+                }
+                else
+                {
+                    dst_w = gui->reserved_w;
+                    dst_h = dst_w * image.rows / image.cols;
+                    dst_x = WINDOW_W - dst_w;
+                    dst_y = WINDOW_H / 2 - dst_h / 2;
+                }
+
                 draw_video((unsigned char*)image.ptr(0), 
-                    WINDOW_W - dst_w,
-                    WINDOW_H - dst_h,
+                    dst_x,
+                    dst_y,
                     dst_w,
                     dst_h,
                     image.cols,
@@ -1501,8 +1908,22 @@ top_y);
             }
             else
             {
-                int dst_h = WINDOW_H;
-                int dst_w = WINDOW_H * image.cols / image.rows;
+// show video during tracking
+                int dst_w;
+                int dst_h;
+
+                if(image.rows > image.cols)
+                {
+                    dst_h = WINDOW_H;
+                    dst_w = dst_h * image.cols / image.rows;
+                }
+                else
+                {
+                    dst_w = WINDOW_W;
+                    dst_h = dst_w * image.rows / image.cols;
+                }
+
+
                 draw_video((unsigned char*)image.ptr(0), 
                     WINDOW_W / 2 - dst_w / 2,
                     0,
@@ -1511,6 +1932,44 @@ top_y);
                     image.cols,
                     image.rows,
                     image.cols * 3);
+
+
+
+// record output during tracking only.  Can't change frame size while recording.
+#ifdef SAVE_OUTPUT2
+                if(!ffmpeg_fd)
+                {
+                    char string[TEXTLEN];
+                    sprintf(string, 
+                        "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 15 -s:v %dx%d -i - -c:v mpeg4 -vb 5000k -an %s", 
+                        image.cols,
+                        image.rows,
+                        OUTPATH2);
+                    printf("Process::workConsumer %d: %s\n",
+                        __LINE__,
+                        string);
+                    ffmpeg_fd = popen(string, "w");
+    //                ffmpeg_fd = fopen(OUTPATH2, "w");
+                    if(!ffmpeg_fd)
+                    {
+                        printf("Process::workConsumer %d: failed to run ffmpeg\n",
+                            __LINE__);
+                        sleep(1);
+                    }
+
+                }
+
+                if(ffmpeg_fd)
+                {
+                    fwrite((unsigned char*)image.ptr(0),
+                        1,
+                        image.cols * image.rows * 3,
+                        ffmpeg_fd);
+                }
+#endif // SAVE_OUTPUT2
+
+
+
             }
         }
         
@@ -1538,12 +1997,12 @@ int main(int argc, char *argv[])
 
     init_gui();
     int result = init_servos();
-    if(result)
-    {
-// don't use the camera mount
-        current_operation = TRACKING;
-    }
-    else
+//     if(result)
+//     {
+// // don't use the camera mount
+//         current_operation = TRACKING;
+//     }
+//     else
     {
         gui->lock_window();
         gui->set_font(LARGEFONT);
@@ -1565,7 +2024,13 @@ int main(int argc, char *argv[])
     op::Wrapper opWrapper;
 #ifdef LOAD_GPHOTO2
     opWrapper.setWorker(op::WorkerType::Input, // workerType
-        std::make_shared<FrameInput>(), // worker
+        std::make_shared<GPhoto2Input>(), // worker
+        false); // const bool workerOnNewThread
+#endif
+
+#ifdef LOAD_HDMI
+    opWrapper.setWorker(op::WorkerType::Input, // workerType
+        std::make_shared<HDMIInput>(), // worker
         false); // const bool workerOnNewThread
 #endif
 

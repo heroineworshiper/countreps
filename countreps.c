@@ -1,6 +1,6 @@
 /*
  * countreps
- * Copyright (C) 2019 Adam Williams <broadcast at earthling dot net>
+ * Copyright (C) 2019-2021 Adam Williams <broadcast at earthling dot net>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -94,8 +94,9 @@
     //#define SERVER_READFILES
     // save frames from the tablet in test_input
     #define SAVE_INPUT
-    // save openpose output in test_output
-    #define SAVE_OUTPUT
+
+// save openpose output in test_output
+//#define SAVE_OUTPUT
 
 // use openpose instead of guicast to show a window on the screen
 //#define USE_GUI
