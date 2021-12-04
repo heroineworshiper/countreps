@@ -1,0 +1,1288 @@
+%CMF
+# %PSECTS Section
+# For each object file, details of its psects are enumerated here.
+# The begining of the section is indicated by %PSECTS.  The first
+# line indicates the name of the first object file, e.g.
+#    $foo.obj
+# Each line that follows describes a psect in that object file, until
+# the next object file.  The lines that describe a psect have the
+# format:
+#    <psect name> <class name> <space> <link address> <load addresses> <length> <delta>
+# All addresses and the length are given in unqualified hexadecimal
+# in delta units.  Any other numeric values are decimal.
+%PSECTS
+$dist/default/production/transceiver.X.production.obj
+intcodelo CODE 0 18 18 AE 1
+cinit CODE 0 DB6 DB6 76 1
+intcode_body CODE 0 A02 A02 D2 1
+text0 CODE 0 CA CA 238 1
+text1 CODE 0 1216 1216 2C 1
+text2 CODE 0 12AC 12AC 14 1
+text3 CODE 0 C66 C66 A8 1
+text4 CODE 0 10B0 10B0 3A 1
+text5 CODE 0 11B8 11B8 30 1
+text6 CODE 0 1120 1120 34 1
+text7 CODE 0 FE0 FE0 4C 1
+text8 CODE 0 1292 1292 1A 1
+text9 CODE 0 12D4 12D4 12 1
+text10 CODE 0 6D2 6D2 12C 1
+text11 CODE 0 1242 1242 2A 1
+text14 CODE 0 1154 1154 32 1
+text15 CODE 0 E2C E2C 64 1
+text16 CODE 0 302 302 204 1
+text17 CODE 0 506 506 1CC 1
+text18 CODE 0 12E6 12E6 12 1
+text19 CODE 0 7FE 7FE 10A 1
+text20 CODE 0 126C 126C 26 1
+text21 CODE 0 AD4 AD4 D2 1
+text22 CODE 0 12C0 12C0 14 1
+text23 CODE 0 908 908 FA 1
+text24 CODE 0 102C 102C 42 1
+text25 CODE 0 EF0 EF0 52 1
+text26 CODE 0 BA6 BA6 C0 1
+text27 CODE 0 11E8 11E8 2E 1
+text28 CODE 0 F92 F92 4E 1
+text29 CODE 0 1186 1186 32 1
+text30 CODE 0 E90 E90 60 1
+text31 CODE 0 D0E D0E A8 1
+text32 CODE 0 12F8 12F8 12 1
+text33 CODE 0 10EA 10EA 36 1
+text34 CODE 0 F42 F42 50 1
+text35 CODE 0 106E 106E 42 1
+idataCOMRAM CODE 0 130A 130A A 1
+cstackCOMRAM COMRAM 1 1 1 33 1
+cstackBANK0 BANK0 1 88 88 23 1
+temp COMRAM 1 4E 4E 1 1
+bssBANK0 BANK0 1 60 60 28 1
+bssBANK1 BANK1 1 100 100 100 1
+intcode CODE 0 8 8 6 1
+idataBANK0 CODE 0 1314 1314 A 1
+dataBANK0 BANK0 1 AB AB A 1
+dataCOMRAM COMRAM 1 44 44 A 1
+bssCOMRAM COMRAM 1 34 34 10 1
+mediumconst MEDIUMCONST 0 3EF2 3EF2 10E 1
+$/tmp/xcXDnfIww.obj
+idloc IDLOC 0 200000 200000 8 1
+init CODE 0 C6 C6 4 1
+reset_vec CODE 0 0 0 4 1
+config CONFIG 0 300000 300000 E 1
+# %UNUSED Section
+# This section enumerates the unused ranges of each CLASS. Each entry
+# is described on a single line as follows:
+#    <class name> <range> <delta>
+# Addresses given in the range are in hexadecimal and units of delta.
+%UNUSED
+RAM B5-FF 1
+RAM 200-2FF 1
+SFR F53-FFF 1
+BANK0 B5-FF 1
+BANK2 200-2FF 1
+CONST 4-7 1
+CONST E-17 1
+CONST 131E-3EF1 1
+STACK 200-2FF 1
+SMALLCONST 131E-3EF1 1
+CODE 4-7 1
+CODE E-17 1
+CODE 131E-3EF1 1
+BIGRAM 4F-5F 1
+BIGRAM B5-FF 1
+BIGRAM 200-2FF 1
+COMRAM 4F-5F 1
+EEDATA F00000-F000FF 1
+MEDIUMCONST 131E-3EF1 1
+# %LINETAB Section
+# This section enumerates the file/line to address mappings.
+# The beginning of the section is indicated by %LINETAB.
+# The first line indicates the name of the first object file, e.g.
+#   $foo.obj
+# Each line that follows describes a single mapping until the next
+# object file.  Mappings have the following format:
+#    <address> <psect name> <class name> ><line number>:<file name>
+# The address is absolute and given given in unqualified hex 
+# in delta units of the psect. All mappings within an object file
+# are in ascending order of addresses.
+# All other numeric values are in decimal.
+%LINETAB
+$dist/default/production/transceiver.X.production.obj
+18 intcodelo CODE >196:/amazon/root/heroineclock/transceiver.X/transceiver.c
+18 intcodelo CODE >1455:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6E intcodelo CODE >1457:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8 intcode CODE >1457:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8 intcode CODE >1459:/amazon/root/heroineclock/transceiver.X/transceiver.c
+106E text35 CODE >171:/amazon/root/heroineclock/transceiver.X/transceiver.c
+106E text35 CODE >173:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1070 text35 CODE >175:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1074 text35 CODE >176:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1080 text35 CODE >178:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1094 text35 CODE >179:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1098 text35 CODE >180:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10A4 text35 CODE >182:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10AC text35 CODE >183:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10AE text35 CODE >185:/amazon/root/heroineclock/transceiver.X/transceiver.c
+F42 text34 CODE >668:/amazon/root/heroineclock/transceiver.X/transceiver.c
+F42 text34 CODE >670:/amazon/root/heroineclock/transceiver.X/transceiver.c
+F46 text34 CODE >673:/amazon/root/heroineclock/transceiver.X/transceiver.c
+F84 text34 CODE >676:/amazon/root/heroineclock/transceiver.X/transceiver.c
+F90 text34 CODE >677:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10EA text33 CODE >680:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10EA text33 CODE >685:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10EE text33 CODE >687:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10F4 text33 CODE >689:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10F8 text33 CODE >690:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10FA text33 CODE >691:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10FC text33 CODE >692:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10FE text33 CODE >694:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1100 text33 CODE >696:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1102 text33 CODE >697:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1104 text33 CODE >698:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1106 text33 CODE >699:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1108 text33 CODE >700:/amazon/root/heroineclock/transceiver.X/transceiver.c
+110A text33 CODE >701:/amazon/root/heroineclock/transceiver.X/transceiver.c
+110C text33 CODE >694:/amazon/root/heroineclock/transceiver.X/transceiver.c
+110C text33 CODE >702:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1110 text33 CODE >704:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1112 text33 CODE >705:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1116 text33 CODE >707:/amazon/root/heroineclock/transceiver.X/transceiver.c
+111A text33 CODE >708:/amazon/root/heroineclock/transceiver.X/transceiver.c
+111E text33 CODE >709:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12F8 text32 CODE >711:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12F8 text32 CODE >713:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12FE text32 CODE >715:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1302 text32 CODE >716:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1306 text32 CODE >717:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1306 text32 CODE >719:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1308 text32 CODE >720:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D0E text31 CODE >879:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D0E text31 CODE >886:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D16 text31 CODE >887:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D22 text31 CODE >889:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D2A text31 CODE >890:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D2A text31 CODE >892:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D3A text31 CODE >896:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D40 text31 CODE >897:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D40 text31 CODE >898:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D88 text31 CODE >896:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D9C text31 CODE >900:/amazon/root/heroineclock/transceiver.X/transceiver.c
+DAC text31 CODE >901:/amazon/root/heroineclock/transceiver.X/transceiver.c
+DB4 text31 CODE >902:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E90 text30 CODE >1109:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E90 text30 CODE >1113:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E98 text30 CODE >1116:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EAA text30 CODE >1118:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EB0 text30 CODE >1120:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EB4 text30 CODE >1122:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EB4 text30 CODE >1124:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EB8 text30 CODE >1125:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EB8 text30 CODE >1129:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EBE text30 CODE >1131:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EC2 text30 CODE >1134:/amazon/root/heroineclock/transceiver.X/transceiver.c
+ECE text30 CODE >1137:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EDA text30 CODE >1138:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EDC text30 CODE >1139:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EDC text30 CODE >1142:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EE8 text30 CODE >1144:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EEA text30 CODE >1145:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EEA text30 CODE >1147:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1186 text29 CODE >268:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1188 text29 CODE >270:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1190 text29 CODE >272:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11A4 text29 CODE >273:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11A8 text29 CODE >274:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11AE text29 CODE >276:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11B6 text29 CODE >277:/amazon/root/heroineclock/transceiver.X/transceiver.c
+F92 text28 CODE >310:/amazon/root/heroineclock/transceiver.X/transceiver.c
+F94 text28 CODE >312:/amazon/root/heroineclock/transceiver.X/transceiver.c
+FB6 text28 CODE >313:/amazon/root/heroineclock/transceiver.X/transceiver.c
+FD8 text28 CODE >314:/amazon/root/heroineclock/transceiver.X/transceiver.c
+FDE text28 CODE >315:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11E8 text27 CODE >281:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11E8 text27 CODE >283:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11EA text27 CODE >285:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11FC text27 CODE >286:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1200 text27 CODE >283:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1200 text27 CODE >287:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BA6 text26 CODE >1035:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BA6 text26 CODE >1040:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BB8 text26 CODE >1042:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BC0 text26 CODE >1045:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BCC text26 CODE >1046:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BDA text26 CODE >1047:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BEC text26 CODE >1048:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BFE text26 CODE >1049:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C10 text26 CODE >1050:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C22 text26 CODE >1051:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C34 text26 CODE >1052:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C46 text26 CODE >1053:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C58 text26 CODE >1054:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C64 text26 CODE >1055:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EF0 text25 CODE >8:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+EF0 text25 CODE >14:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+EF8 text25 CODE >15:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F00 text25 CODE >16:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F04 text25 CODE >17:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F06 text25 CODE >18:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F0C text25 CODE >19:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F0E text25 CODE >17:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F0E text25 CODE >20:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F12 text25 CODE >22:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F18 text25 CODE >23:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F24 text25 CODE >24:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F2C text25 CODE >25:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F2E text25 CODE >26:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F2E text25 CODE >27:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F34 text25 CODE >28:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F38 text25 CODE >30:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+F40 text25 CODE >31:/opt/microchip/xc8/v1.45/sources/common/lwdiv.c
+102C text24 CODE >8:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+102C text24 CODE >13:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1034 text24 CODE >14:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1038 text24 CODE >15:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+103A text24 CODE >16:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1040 text24 CODE >17:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1042 text24 CODE >15:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1042 text24 CODE >18:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1046 text24 CODE >20:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1052 text24 CODE >21:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+105A text24 CODE >22:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1060 text24 CODE >23:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+1064 text24 CODE >25:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+106C text24 CODE >26:/opt/microchip/xc8/v1.45/sources/common/lwmod.c
+908 text23 CODE >290:/amazon/root/heroineclock/transceiver.X/transceiver.c
+908 text23 CODE >292:/amazon/root/heroineclock/transceiver.X/transceiver.c
+930 text23 CODE >293:/amazon/root/heroineclock/transceiver.X/transceiver.c
+96C text23 CODE >294:/amazon/root/heroineclock/transceiver.X/transceiver.c
+9A8 text23 CODE >295:/amazon/root/heroineclock/transceiver.X/transceiver.c
+9E4 text23 CODE >296:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A00 text23 CODE >297:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12C0 text22 CODE >299:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12C0 text22 CODE >301:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12CC text22 CODE >302:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12D2 text22 CODE >303:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AD4 text21 CODE >724:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AD4 text21 CODE >727:/amazon/root/heroineclock/transceiver.X/transceiver.c
+ADA text21 CODE >728:/amazon/root/heroineclock/transceiver.X/transceiver.c
+ADC text21 CODE >729:/amazon/root/heroineclock/transceiver.X/transceiver.c
+ADE text21 CODE >730:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AE0 text21 CODE >731:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AE2 text21 CODE >733:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AE6 text21 CODE >734:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AE8 text21 CODE >735:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AEA text21 CODE >736:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AEC text21 CODE >737:/amazon/root/heroineclock/transceiver.X/transceiver.c
+AEE text21 CODE >739:/amazon/root/heroineclock/transceiver.X/transceiver.c
+B2A text21 CODE >741:/amazon/root/heroineclock/transceiver.X/transceiver.c
+B68 text21 CODE >742:/amazon/root/heroineclock/transceiver.X/transceiver.c
+BA4 text21 CODE >743:/amazon/root/heroineclock/transceiver.X/transceiver.c
+126C text20 CODE >188:/amazon/root/heroineclock/transceiver.X/transceiver.c
+126C text20 CODE >191:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1274 text20 CODE >192:/amazon/root/heroineclock/transceiver.X/transceiver.c
+127E text20 CODE >193:/amazon/root/heroineclock/transceiver.X/transceiver.c
+127E text20 CODE >194:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1280 text20 CODE >192:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7FE text19 CODE >198:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7FE text19 CODE >201:/amazon/root/heroineclock/transceiver.X/transceiver.c
+802 text19 CODE >203:/amazon/root/heroineclock/transceiver.X/transceiver.c
+804 text19 CODE >204:/amazon/root/heroineclock/transceiver.X/transceiver.c
+806 text19 CODE >205:/amazon/root/heroineclock/transceiver.X/transceiver.c
+808 text19 CODE >206:/amazon/root/heroineclock/transceiver.X/transceiver.c
+808 text19 CODE >209:/amazon/root/heroineclock/transceiver.X/transceiver.c
+812 text19 CODE >212:/amazon/root/heroineclock/transceiver.X/transceiver.c
+826 text19 CODE >213:/amazon/root/heroineclock/transceiver.X/transceiver.c
+82C text19 CODE >215:/amazon/root/heroineclock/transceiver.X/transceiver.c
+834 text19 CODE >216:/amazon/root/heroineclock/transceiver.X/transceiver.c
+834 text19 CODE >217:/amazon/root/heroineclock/transceiver.X/transceiver.c
+83A text19 CODE >221:/amazon/root/heroineclock/transceiver.X/transceiver.c
+83C text19 CODE >222:/amazon/root/heroineclock/transceiver.X/transceiver.c
+848 text19 CODE >223:/amazon/root/heroineclock/transceiver.X/transceiver.c
+852 text19 CODE >224:/amazon/root/heroineclock/transceiver.X/transceiver.c
+85E text19 CODE >225:/amazon/root/heroineclock/transceiver.X/transceiver.c
+868 text19 CODE >226:/amazon/root/heroineclock/transceiver.X/transceiver.c
+874 text19 CODE >227:/amazon/root/heroineclock/transceiver.X/transceiver.c
+87E text19 CODE >228:/amazon/root/heroineclock/transceiver.X/transceiver.c
+88A text19 CODE >229:/amazon/root/heroineclock/transceiver.X/transceiver.c
+894 text19 CODE >230:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8A0 text19 CODE >231:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8AA text19 CODE >232:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8B6 text19 CODE >233:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8C0 text19 CODE >234:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8CC text19 CODE >235:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8D6 text19 CODE >236:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8E2 text19 CODE >237:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8EC text19 CODE >238:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8F8 text19 CODE >240:/amazon/root/heroineclock/transceiver.X/transceiver.c
+8FA text19 CODE >241:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12E6 text18 CODE >259:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12E6 text18 CODE >261:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12E8 text18 CODE >263:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12EC text18 CODE >261:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12EC text18 CODE >264:/amazon/root/heroineclock/transceiver.X/transceiver.c
+506 text17 CODE >745:/amazon/root/heroineclock/transceiver.X/transceiver.c
+506 text17 CODE >750:/amazon/root/heroineclock/transceiver.X/transceiver.c
+516 text17 CODE >757:/amazon/root/heroineclock/transceiver.X/transceiver.c
+51E text17 CODE >759:/amazon/root/heroineclock/transceiver.X/transceiver.c
+522 text17 CODE >760:/amazon/root/heroineclock/transceiver.X/transceiver.c
+526 text17 CODE >762:/amazon/root/heroineclock/transceiver.X/transceiver.c
+528 text17 CODE >763:/amazon/root/heroineclock/transceiver.X/transceiver.c
+528 text17 CODE >764:/amazon/root/heroineclock/transceiver.X/transceiver.c
+530 text17 CODE >766:/amazon/root/heroineclock/transceiver.X/transceiver.c
+534 text17 CODE >768:/amazon/root/heroineclock/transceiver.X/transceiver.c
+544 text17 CODE >770:/amazon/root/heroineclock/transceiver.X/transceiver.c
+54A text17 CODE >772:/amazon/root/heroineclock/transceiver.X/transceiver.c
+55C text17 CODE >773:/amazon/root/heroineclock/transceiver.X/transceiver.c
+564 text17 CODE >775:/amazon/root/heroineclock/transceiver.X/transceiver.c
+566 text17 CODE >776:/amazon/root/heroineclock/transceiver.X/transceiver.c
+566 text17 CODE >777:/amazon/root/heroineclock/transceiver.X/transceiver.c
+56E text17 CODE >779:/amazon/root/heroineclock/transceiver.X/transceiver.c
+580 text17 CODE >780:/amazon/root/heroineclock/transceiver.X/transceiver.c
+588 text17 CODE >782:/amazon/root/heroineclock/transceiver.X/transceiver.c
+58A text17 CODE >783:/amazon/root/heroineclock/transceiver.X/transceiver.c
+58A text17 CODE >784:/amazon/root/heroineclock/transceiver.X/transceiver.c
+592 text17 CODE >788:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5A2 text17 CODE >793:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5AA text17 CODE >796:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5BC text17 CODE >797:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5C4 text17 CODE >799:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5C6 text17 CODE >800:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5C6 text17 CODE >801:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5CC text17 CODE >804:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5DE text17 CODE >805:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5E6 text17 CODE >807:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5E8 text17 CODE >808:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5E8 text17 CODE >811:/amazon/root/heroineclock/transceiver.X/transceiver.c
+5FA text17 CODE >812:/amazon/root/heroineclock/transceiver.X/transceiver.c
+602 text17 CODE >815:/amazon/root/heroineclock/transceiver.X/transceiver.c
+604 text17 CODE >816:/amazon/root/heroineclock/transceiver.X/transceiver.c
+604 text17 CODE >817:/amazon/root/heroineclock/transceiver.X/transceiver.c
+60C text17 CODE >819:/amazon/root/heroineclock/transceiver.X/transceiver.c
+61E text17 CODE >820:/amazon/root/heroineclock/transceiver.X/transceiver.c
+626 text17 CODE >822:/amazon/root/heroineclock/transceiver.X/transceiver.c
+628 text17 CODE >823:/amazon/root/heroineclock/transceiver.X/transceiver.c
+628 text17 CODE >826:/amazon/root/heroineclock/transceiver.X/transceiver.c
+634 text17 CODE >827:/amazon/root/heroineclock/transceiver.X/transceiver.c
+63E text17 CODE >828:/amazon/root/heroineclock/transceiver.X/transceiver.c
+64A text17 CODE >829:/amazon/root/heroineclock/transceiver.X/transceiver.c
+64E text17 CODE >832:/amazon/root/heroineclock/transceiver.X/transceiver.c
+650 text17 CODE >833:/amazon/root/heroineclock/transceiver.X/transceiver.c
+650 text17 CODE >834:/amazon/root/heroineclock/transceiver.X/transceiver.c
+658 text17 CODE >840:/amazon/root/heroineclock/transceiver.X/transceiver.c
+65C text17 CODE >842:/amazon/root/heroineclock/transceiver.X/transceiver.c
+66C text17 CODE >843:/amazon/root/heroineclock/transceiver.X/transceiver.c
+672 text17 CODE >845:/amazon/root/heroineclock/transceiver.X/transceiver.c
+676 text17 CODE >847:/amazon/root/heroineclock/transceiver.X/transceiver.c
+678 text17 CODE >848:/amazon/root/heroineclock/transceiver.X/transceiver.c
+678 text17 CODE >850:/amazon/root/heroineclock/transceiver.X/transceiver.c
+67C text17 CODE >853:/amazon/root/heroineclock/transceiver.X/transceiver.c
+680 text17 CODE >858:/amazon/root/heroineclock/transceiver.X/transceiver.c
+682 text17 CODE >859:/amazon/root/heroineclock/transceiver.X/transceiver.c
+682 text17 CODE >860:/amazon/root/heroineclock/transceiver.X/transceiver.c
+68A text17 CODE >862:/amazon/root/heroineclock/transceiver.X/transceiver.c
+68E text17 CODE >863:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6A0 text17 CODE >864:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6A8 text17 CODE >866:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6AA text17 CODE >867:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6AA text17 CODE >869:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6B6 text17 CODE >870:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6C0 text17 CODE >871:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6CC text17 CODE >872:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6D0 text17 CODE >873:/amazon/root/heroineclock/transceiver.X/transceiver.c
+302 text16 CODE >905:/amazon/root/heroineclock/transceiver.X/transceiver.c
+302 text16 CODE >907:/amazon/root/heroineclock/transceiver.X/transceiver.c
+306 text16 CODE >908:/amazon/root/heroineclock/transceiver.X/transceiver.c
+30A text16 CODE >909:/amazon/root/heroineclock/transceiver.X/transceiver.c
+312 text16 CODE >925:/amazon/root/heroineclock/transceiver.X/transceiver.c
+31E text16 CODE >926:/amazon/root/heroineclock/transceiver.X/transceiver.c
+322 text16 CODE >932:/amazon/root/heroineclock/transceiver.X/transceiver.c
+328 text16 CODE >934:/amazon/root/heroineclock/transceiver.X/transceiver.c
+32C text16 CODE >935:/amazon/root/heroineclock/transceiver.X/transceiver.c
+32E text16 CODE >936:/amazon/root/heroineclock/transceiver.X/transceiver.c
+32E text16 CODE >937:/amazon/root/heroineclock/transceiver.X/transceiver.c
+336 text16 CODE >941:/amazon/root/heroineclock/transceiver.X/transceiver.c
+36A text16 CODE >942:/amazon/root/heroineclock/transceiver.X/transceiver.c
+372 text16 CODE >949:/amazon/root/heroineclock/transceiver.X/transceiver.c
+382 text16 CODE >956:/amazon/root/heroineclock/transceiver.X/transceiver.c
+396 text16 CODE >970:/amazon/root/heroineclock/transceiver.X/transceiver.c
+396 text16 CODE >984:/amazon/root/heroineclock/transceiver.X/transceiver.c
+398 text16 CODE >986:/amazon/root/heroineclock/transceiver.X/transceiver.c
+39E text16 CODE >991:/amazon/root/heroineclock/transceiver.X/transceiver.c
+3DC text16 CODE >992:/amazon/root/heroineclock/transceiver.X/transceiver.c
+3E8 text16 CODE >994:/amazon/root/heroineclock/transceiver.X/transceiver.c
+3EA text16 CODE >995:/amazon/root/heroineclock/transceiver.X/transceiver.c
+3EA text16 CODE >999:/amazon/root/heroineclock/transceiver.X/transceiver.c
+3F6 text16 CODE >1005:/amazon/root/heroineclock/transceiver.X/transceiver.c
+41E text16 CODE >1006:/amazon/root/heroineclock/transceiver.X/transceiver.c
+42A text16 CODE >1008:/amazon/root/heroineclock/transceiver.X/transceiver.c
+432 text16 CODE >1009:/amazon/root/heroineclock/transceiver.X/transceiver.c
+432 text16 CODE >1011:/amazon/root/heroineclock/transceiver.X/transceiver.c
+436 text16 CODE >1012:/amazon/root/heroineclock/transceiver.X/transceiver.c
+43A text16 CODE >1014:/amazon/root/heroineclock/transceiver.X/transceiver.c
+478 text16 CODE >1016:/amazon/root/heroineclock/transceiver.X/transceiver.c
+498 text16 CODE >1017:/amazon/root/heroineclock/transceiver.X/transceiver.c
+4A4 text16 CODE >1021:/amazon/root/heroineclock/transceiver.X/transceiver.c
+4A6 text16 CODE >1022:/amazon/root/heroineclock/transceiver.X/transceiver.c
+4A6 text16 CODE >1025:/amazon/root/heroineclock/transceiver.X/transceiver.c
+4AA text16 CODE >1026:/amazon/root/heroineclock/transceiver.X/transceiver.c
+4BA text16 CODE >1027:/amazon/root/heroineclock/transceiver.X/transceiver.c
+4C6 text16 CODE >1029:/amazon/root/heroineclock/transceiver.X/transceiver.c
+504 text16 CODE >1031:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E2C text15 CODE >1058:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E2C text15 CODE >1061:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E38 text15 CODE >1062:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E3C text15 CODE >1072:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E44 text15 CODE >1075:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E48 text15 CODE >1076:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E4A text15 CODE >1077:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E4A text15 CODE >1081:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E52 text15 CODE >1083:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E5E text15 CODE >1084:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E62 text15 CODE >1086:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E70 text15 CODE >1089:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E7C text15 CODE >1090:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E7C text15 CODE >1093:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E88 text15 CODE >1095:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E8A text15 CODE >1096:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E8A text15 CODE >1099:/amazon/root/heroineclock/transceiver.X/transceiver.c
+E8E text15 CODE >1100:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1154 text14 CODE >1153:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1154 text14 CODE >1157:/amazon/root/heroineclock/transceiver.X/transceiver.c
+115A text14 CODE >1159:/amazon/root/heroineclock/transceiver.X/transceiver.c
+115E text14 CODE >1160:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1160 text14 CODE >1161:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1160 text14 CODE >1162:/amazon/root/heroineclock/transceiver.X/transceiver.c
+117E text14 CODE >1164:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1182 text14 CODE >1165:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1182 text14 CODE >1171:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1184 text14 CODE >1172:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A02 intcode_body CODE >1459:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A4A intcode_body CODE >1461:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A4C intcode_body CODE >1462:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A4E intcode_body CODE >1464:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A50 intcode_body CODE >1467:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A54 intcode_body CODE >1469:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A56 intcode_body CODE >1470:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A58 intcode_body CODE >1471:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A5A intcode_body CODE >1473:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A5E intcode_body CODE >1476:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A60 intcode_body CODE >1478:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A64 intcode_body CODE >1481:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A66 intcode_body CODE >1483:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A6A intcode_body CODE >1484:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A6A intcode_body CODE >1488:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A6E intcode_body CODE >1490:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A70 intcode_body CODE >1491:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A78 intcode_body CODE >1492:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A7E intcode_body CODE >1495:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A7E intcode_body CODE >1497:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A80 intcode_body CODE >1500:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A84 intcode_body CODE >1462:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A84 intcode_body CODE >1501:/amazon/root/heroineclock/transceiver.X/transceiver.c
+A88 intcode_body CODE >1503:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1242 text11 CODE >188:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1242 text11 CODE >191:/amazon/root/heroineclock/transceiver.X/transceiver.c
+124C text11 CODE >192:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1256 text11 CODE >193:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1256 text11 CODE >194:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1258 text11 CODE >192:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6D2 text10 CODE >198:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6D2 text10 CODE >201:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6D6 text10 CODE >203:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6D8 text10 CODE >204:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6DA text10 CODE >205:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6DC text10 CODE >206:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6DC text10 CODE >209:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6E6 text10 CODE >212:/amazon/root/heroineclock/transceiver.X/transceiver.c
+6FA text10 CODE >213:/amazon/root/heroineclock/transceiver.X/transceiver.c
+700 text10 CODE >215:/amazon/root/heroineclock/transceiver.X/transceiver.c
+708 text10 CODE >216:/amazon/root/heroineclock/transceiver.X/transceiver.c
+708 text10 CODE >217:/amazon/root/heroineclock/transceiver.X/transceiver.c
+70E text10 CODE >221:/amazon/root/heroineclock/transceiver.X/transceiver.c
+710 text10 CODE >222:/amazon/root/heroineclock/transceiver.X/transceiver.c
+71C text10 CODE >223:/amazon/root/heroineclock/transceiver.X/transceiver.c
+728 text10 CODE >224:/amazon/root/heroineclock/transceiver.X/transceiver.c
+736 text10 CODE >225:/amazon/root/heroineclock/transceiver.X/transceiver.c
+742 text10 CODE >226:/amazon/root/heroineclock/transceiver.X/transceiver.c
+750 text10 CODE >227:/amazon/root/heroineclock/transceiver.X/transceiver.c
+75C text10 CODE >228:/amazon/root/heroineclock/transceiver.X/transceiver.c
+76A text10 CODE >229:/amazon/root/heroineclock/transceiver.X/transceiver.c
+776 text10 CODE >230:/amazon/root/heroineclock/transceiver.X/transceiver.c
+784 text10 CODE >231:/amazon/root/heroineclock/transceiver.X/transceiver.c
+790 text10 CODE >232:/amazon/root/heroineclock/transceiver.X/transceiver.c
+79E text10 CODE >233:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7AA text10 CODE >234:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7B8 text10 CODE >235:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7C4 text10 CODE >236:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7D2 text10 CODE >237:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7DE text10 CODE >238:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7EC text10 CODE >240:/amazon/root/heroineclock/transceiver.X/transceiver.c
+7EE text10 CODE >241:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12D4 text9 CODE >259:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12D4 text9 CODE >261:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12D6 text9 CODE >263:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12DA text9 CODE >261:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12DA text9 CODE >264:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1292 text8 CODE >157:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1292 text8 CODE >160:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1296 text8 CODE >161:/amazon/root/heroineclock/transceiver.X/transceiver.c
+129A text8 CODE >162:/amazon/root/heroineclock/transceiver.X/transceiver.c
+129E text8 CODE >165:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12A2 text8 CODE >166:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12A6 text8 CODE >167:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12A8 text8 CODE >168:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12AA text8 CODE >169:/amazon/root/heroineclock/transceiver.X/transceiver.c
+FE0 text7 CODE >625:/amazon/root/heroineclock/transceiver.X/transceiver.c
+FE0 text7 CODE >628:/amazon/root/heroineclock/transceiver.X/transceiver.c
+FEE text7 CODE >629:/amazon/root/heroineclock/transceiver.X/transceiver.c
+FEE text7 CODE >630:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1002 text7 CODE >628:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1006 text7 CODE >634:/amazon/root/heroineclock/transceiver.X/transceiver.c
+100A text7 CODE >637:/amazon/root/heroineclock/transceiver.X/transceiver.c
+100E text7 CODE >644:/amazon/root/heroineclock/transceiver.X/transceiver.c
+100E text7 CODE >646:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1010 text7 CODE >647:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1014 text7 CODE >654:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1018 text7 CODE >655:/amazon/root/heroineclock/transceiver.X/transceiver.c
+101C text7 CODE >656:/amazon/root/heroineclock/transceiver.X/transceiver.c
+101E text7 CODE >657:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1020 text7 CODE >658:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1022 text7 CODE >659:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1024 text7 CODE >660:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1026 text7 CODE >661:/amazon/root/heroineclock/transceiver.X/transceiver.c
+102A text7 CODE >662:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1120 text6 CODE >268:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1124 text6 CODE >270:/amazon/root/heroineclock/transceiver.X/transceiver.c
+112C text6 CODE >272:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1140 text6 CODE >273:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1144 text6 CODE >274:/amazon/root/heroineclock/transceiver.X/transceiver.c
+114A text6 CODE >276:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1152 text6 CODE >277:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11B8 text5 CODE >281:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11B8 text5 CODE >283:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11BA text5 CODE >285:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11CC text5 CODE >286:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11D2 text5 CODE >283:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11D2 text5 CODE >287:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10B0 text4 CODE >1240:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10B0 text4 CODE >1242:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10B2 text4 CODE >1244:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10C0 text4 CODE >1245:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10C0 text4 CODE >1246:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10D8 text4 CODE >1247:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10DE text4 CODE >1248:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10E0 text4 CODE >1249:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10E2 text4 CODE >1244:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10E6 text4 CODE >1251:/amazon/root/heroineclock/transceiver.X/transceiver.c
+10E8 text4 CODE >1252:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C66 text3 CODE >1254:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C66 text3 CODE >1257:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C68 text3 CODE >1258:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C6A text3 CODE >1260:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C6C text3 CODE >1261:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C6E text3 CODE >1263:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C70 text3 CODE >1264:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C72 text3 CODE >1267:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C80 text3 CODE >1269:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C8E text3 CODE >1270:/amazon/root/heroineclock/transceiver.X/transceiver.c
+C9C text3 CODE >1271:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CAA text3 CODE >1272:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CB8 text3 CODE >1273:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CC6 text3 CODE >1274:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CD4 text3 CODE >1275:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CE2 text3 CODE >1276:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CF0 text3 CODE >1277:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CFE text3 CODE >1280:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D0C text3 CODE >1281:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12AC text2 CODE >1300:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12AC text2 CODE >1303:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12AE text2 CODE >1304:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12B0 text2 CODE >1305:/amazon/root/heroineclock/transceiver.X/transceiver.c
+12BE text2 CODE >1306:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1216 text1 CODE >1283:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1216 text1 CODE >1286:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1218 text1 CODE >1287:/amazon/root/heroineclock/transceiver.X/transceiver.c
+121A text1 CODE >1289:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1228 text1 CODE >1292:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1232 text1 CODE >1293:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1240 text1 CODE >1297:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CA text0 CODE >1310:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CA text0 CODE >1313:/amazon/root/heroineclock/transceiver.X/transceiver.c
+CE text0 CODE >1314:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D2 text0 CODE >1317:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D4 text0 CODE >1318:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D6 text0 CODE >1320:/amazon/root/heroineclock/transceiver.X/transceiver.c
+D8 text0 CODE >1321:/amazon/root/heroineclock/transceiver.X/transceiver.c
+DA text0 CODE >1332:/amazon/root/heroineclock/transceiver.X/transceiver.c
+DE text0 CODE >1333:/amazon/root/heroineclock/transceiver.X/transceiver.c
+EC text0 CODE >1337:/amazon/root/heroineclock/transceiver.X/transceiver.c
+F2 text0 CODE >1338:/amazon/root/heroineclock/transceiver.X/transceiver.c
+100 text0 CODE >1339:/amazon/root/heroineclock/transceiver.X/transceiver.c
+104 text0 CODE >1343:/amazon/root/heroineclock/transceiver.X/transceiver.c
+108 text0 CODE >1344:/amazon/root/heroineclock/transceiver.X/transceiver.c
+110 text0 CODE >1345:/amazon/root/heroineclock/transceiver.X/transceiver.c
+112 text0 CODE >1346:/amazon/root/heroineclock/transceiver.X/transceiver.c
+114 text0 CODE >1348:/amazon/root/heroineclock/transceiver.X/transceiver.c
+118 text0 CODE >1350:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11C text0 CODE >1352:/amazon/root/heroineclock/transceiver.X/transceiver.c
+11E text0 CODE >1353:/amazon/root/heroineclock/transceiver.X/transceiver.c
+120 text0 CODE >1355:/amazon/root/heroineclock/transceiver.X/transceiver.c
+120 text0 CODE >1357:/amazon/root/heroineclock/transceiver.X/transceiver.c
+122 text0 CODE >1358:/amazon/root/heroineclock/transceiver.X/transceiver.c
+126 text0 CODE >1363:/amazon/root/heroineclock/transceiver.X/transceiver.c
+134 text0 CODE >1370:/amazon/root/heroineclock/transceiver.X/transceiver.c
+138 text0 CODE >1371:/amazon/root/heroineclock/transceiver.X/transceiver.c
+140 text0 CODE >1372:/amazon/root/heroineclock/transceiver.X/transceiver.c
+140 text0 CODE >1373:/amazon/root/heroineclock/transceiver.X/transceiver.c
+144 text0 CODE >1378:/amazon/root/heroineclock/transceiver.X/transceiver.c
+15A text0 CODE >1371:/amazon/root/heroineclock/transceiver.X/transceiver.c
+170 text0 CODE >1381:/amazon/root/heroineclock/transceiver.X/transceiver.c
+174 text0 CODE >1385:/amazon/root/heroineclock/transceiver.X/transceiver.c
+178 text0 CODE >1388:/amazon/root/heroineclock/transceiver.X/transceiver.c
+17C text0 CODE >1398:/amazon/root/heroineclock/transceiver.X/transceiver.c
+18A text0 CODE >1400:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1C6 text0 CODE >1402:/amazon/root/heroineclock/transceiver.X/transceiver.c
+1C6 text0 CODE >1404:/amazon/root/heroineclock/transceiver.X/transceiver.c
+202 text0 CODE >1405:/amazon/root/heroineclock/transceiver.X/transceiver.c
+202 text0 CODE >1409:/amazon/root/heroineclock/transceiver.X/transceiver.c
+20A text0 CODE >1412:/amazon/root/heroineclock/transceiver.X/transceiver.c
+216 text0 CODE >1415:/amazon/root/heroineclock/transceiver.X/transceiver.c
+218 text0 CODE >1416:/amazon/root/heroineclock/transceiver.X/transceiver.c
+21C text0 CODE >1417:/amazon/root/heroineclock/transceiver.X/transceiver.c
+220 text0 CODE >1422:/amazon/root/heroineclock/transceiver.X/transceiver.c
+226 text0 CODE >1424:/amazon/root/heroineclock/transceiver.X/transceiver.c
+22A text0 CODE >1425:/amazon/root/heroineclock/transceiver.X/transceiver.c
+22A text0 CODE >1426:/amazon/root/heroineclock/transceiver.X/transceiver.c
+230 text0 CODE >1427:/amazon/root/heroineclock/transceiver.X/transceiver.c
+230 text0 CODE >1428:/amazon/root/heroineclock/transceiver.X/transceiver.c
+254 text0 CODE >1429:/amazon/root/heroineclock/transceiver.X/transceiver.c
+260 text0 CODE >1431:/amazon/root/heroineclock/transceiver.X/transceiver.c
+268 text0 CODE >1426:/amazon/root/heroineclock/transceiver.X/transceiver.c
+268 text0 CODE >1432:/amazon/root/heroineclock/transceiver.X/transceiver.c
+272 text0 CODE >1434:/amazon/root/heroineclock/transceiver.X/transceiver.c
+27A text0 CODE >1436:/amazon/root/heroineclock/transceiver.X/transceiver.c
+27C text0 CODE >1438:/amazon/root/heroineclock/transceiver.X/transceiver.c
+288 text0 CODE >1440:/amazon/root/heroineclock/transceiver.X/transceiver.c
+2C4 text0 CODE >1442:/amazon/root/heroineclock/transceiver.X/transceiver.c
+2C4 text0 CODE >1444:/amazon/root/heroineclock/transceiver.X/transceiver.c
+300 text0 CODE >1355:/amazon/root/heroineclock/transceiver.X/transceiver.c
+DB6 cinit CODE >991:/tmp/xcXIp78H0
+DB6 cinit CODE >993:/tmp/xcXIp78H0
+DB6 cinit CODE >996:/tmp/xcXIp78H0
+DB6 cinit CODE >1112:/tmp/xcXIp78H0
+DB8 cinit CODE >1113:/tmp/xcXIp78H0
+DBA cinit CODE >1114:/tmp/xcXIp78H0
+DBC cinit CODE >1115:/tmp/xcXIp78H0
+DBE cinit CODE >1116:/tmp/xcXIp78H0
+DC0 cinit CODE >1117:/tmp/xcXIp78H0
+DC2 cinit CODE >1118:/tmp/xcXIp78H0
+DC6 cinit CODE >1119:/tmp/xcXIp78H0
+DCA cinit CODE >1120:/tmp/xcXIp78H0
+DCA cinit CODE >1121:/tmp/xcXIp78H0
+DCC cinit CODE >1122:/tmp/xcXIp78H0
+DD0 cinit CODE >1123:/tmp/xcXIp78H0
+DD2 cinit CODE >1124:/tmp/xcXIp78H0
+DD4 cinit CODE >1125:/tmp/xcXIp78H0
+DD6 cinit CODE >1129:/tmp/xcXIp78H0
+DD8 cinit CODE >1130:/tmp/xcXIp78H0
+DDA cinit CODE >1131:/tmp/xcXIp78H0
+DDC cinit CODE >1132:/tmp/xcXIp78H0
+DDE cinit CODE >1133:/tmp/xcXIp78H0
+DE0 cinit CODE >1134:/tmp/xcXIp78H0
+DE2 cinit CODE >1135:/tmp/xcXIp78H0
+DE6 cinit CODE >1136:/tmp/xcXIp78H0
+DEA cinit CODE >1137:/tmp/xcXIp78H0
+DEA cinit CODE >1138:/tmp/xcXIp78H0
+DEC cinit CODE >1139:/tmp/xcXIp78H0
+DF0 cinit CODE >1140:/tmp/xcXIp78H0
+DF2 cinit CODE >1141:/tmp/xcXIp78H0
+DF4 cinit CODE >1142:/tmp/xcXIp78H0
+DF6 cinit CODE >1146:/tmp/xcXIp78H0
+DFA cinit CODE >1147:/tmp/xcXIp78H0
+DFE cinit CODE >1148:/tmp/xcXIp78H0
+DFE cinit CODE >1149:/tmp/xcXIp78H0
+E00 cinit CODE >1150:/tmp/xcXIp78H0
+E02 cinit CODE >1151:/tmp/xcXIp78H0
+E04 cinit CODE >1152:/tmp/xcXIp78H0
+E06 cinit CODE >1153:/tmp/xcXIp78H0
+E08 cinit CODE >1154:/tmp/xcXIp78H0
+E0A cinit CODE >1157:/tmp/xcXIp78H0
+E0E cinit CODE >1158:/tmp/xcXIp78H0
+E10 cinit CODE >1159:/tmp/xcXIp78H0
+E10 cinit CODE >1160:/tmp/xcXIp78H0
+E12 cinit CODE >1161:/tmp/xcXIp78H0
+E14 cinit CODE >1162:/tmp/xcXIp78H0
+E16 cinit CODE >1165:/tmp/xcXIp78H0
+E1A cinit CODE >1166:/tmp/xcXIp78H0
+E1C cinit CODE >1167:/tmp/xcXIp78H0
+E1C cinit CODE >1168:/tmp/xcXIp78H0
+E1E cinit CODE >1169:/tmp/xcXIp78H0
+E20 cinit CODE >1170:/tmp/xcXIp78H0
+E22 cinit CODE >1176:/tmp/xcXIp78H0
+E22 cinit CODE >1178:/tmp/xcXIp78H0
+E24 cinit CODE >1179:/tmp/xcXIp78H0
+E26 cinit CODE >1180:/tmp/xcXIp78H0
+E28 cinit CODE >1181:/tmp/xcXIp78H0
+# %SYMTAB Section
+# An enumeration of all symbols in the program.
+# The beginning of the section is indicated by %SYMTAB.
+# Each line describes a single symbol as follows:
+#    <label> <value> [-]<load-adj> <class> <space> <psect> <file-name>
+# The value and load-adj are both in unqualified hexadecimal.
+# All other numeric values are in decimal.  The load-adj is the
+# quantity one needs to add to the symbol value in order to obtain the load
+# address of the symbol.  This value may be signed. If the symbol
+# was defined in a psect then <psect> will be "-". File-name
+# is the name of the object file in which the symbol was defined.
+%SYMTAB
+___lwmod@counter C 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__LdataBANK0 0 0 ABS 0 dataBANK0 dist/default/production/transceiver.X.production.obj
+__Lmediumconst 3EF2 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__Hspace_0 30000E 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Hspace_1 200 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Hspace_2 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_IESO$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_handle_uart_rx 10B0 0 CODE 0 text35 dist/default/production/transceiver.X.production.obj
+__HidataBANK0 0 0 ABS 0 idataBANK0 dist/default/production/transceiver.X.production.obj
+__size_of_init_usb 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+write_radio@data 9D 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+__size_ofi2_delayMicroseconds 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+handle_usb_ctrl_in@i 4 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__Hibigdata 0 0 CODE 0 ibigdata dist/default/production/transceiver.X.production.obj
+__end_of_qual_descriptor 3F9B 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__mediumconst 3EF2 0 MEDIUMCONST 0 mediumconst /tmp/xcXDnfIww.obj
+__Heeprom_data 0 0 EEDATA 0 eeprom_data dist/default/production/transceiver.X.production.obj
+__CFG_MCLRE$ON 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_print_number 12C0 0 CODE 0 text22 dist/default/production/transceiver.X.production.obj
+main@i A8 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+i2delayMicroseconds@i 3 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+i2delayMicroseconds@x 1 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__Lsmallconst 0 0 SMALLCONST 0 smallconst dist/default/production/transceiver.X.production.obj
+_TMR0 FD6 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UCFG F61 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UCON F64 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UEP0 F53 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UEP1 F54 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UEP2 F55 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+___sp 0 0 STACK 2 stack /tmp/xcXDnfIww.obj
+_isr1 18 0 CODE 0 intcodelo dist/default/production/transceiver.X.production.obj
+_main CA 0 CODE 0 text0 dist/default/production/transceiver.X.production.obj
+_tick 86 0 BANK0 1 bssBANK0 dist/default/production/transceiver.X.production.obj
+btemp 4E 0 COMRAM 1 temp dist/default/production/transceiver.X.production.obj
+start C6 0 CODE 0 init /tmp/xcXDnfIww.obj
+__size_of_isr1 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of_main 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of___lwdiv 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of___lwmod 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+i2print_text@s 2 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__size_of_write_radio 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__HbssCOMRAM 0 0 ABS 0 bssCOMRAM dist/default/production/transceiver.X.production.obj
+_setup_in_packet 46 0 COMRAM 1 dataCOMRAM dist/default/production/transceiver.X.production.obj
+__LidataBANK0 0 0 ABS 0 idataBANK0 dist/default/production/transceiver.X.production.obj
+__Hpowerup C6 0 CODE 0 powerup dist/default/production/transceiver.X.production.obj
+_UEP0bits F53 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UEP1bits F54 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UEP2bits F55 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_print_byte 1120 0 CODE 0 text6 dist/default/production/transceiver.X.production.obj
+_print_hex2 F92 0 CODE 0 text28 dist/default/production/transceiver.X.production.obj
+_print_text 11B8 0 CODE 0 text5 dist/default/production/transceiver.X.production.obj
+__HdataCOMRAM 0 0 ABS 0 dataCOMRAM dist/default/production/transceiver.X.production.obj
+i2_delayMicroseconds 126C 0 CODE 0 text20 dist/default/production/transceiver.X.production.obj
+__accesstop 60 0 ABS 0 - /tmp/xcXDnfIww.obj
+intlevel0 0 0 CODE 0 text /tmp/xcXDnfIww.obj
+intlevel1 0 0 CODE 0 text /tmp/xcXDnfIww.obj
+intlevel2 0 0 CODE 0 text /tmp/xcXDnfIww.obj
+intlevel3 0 0 CODE 0 text /tmp/xcXDnfIww.obj
+__LbssCOMRAM 0 0 ABS 0 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__size_of_flush_uart 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_init_usb FE0 0 CODE 0 text7 dist/default/production/transceiver.X.production.obj
+_qual_descriptor 3F91 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+_receive_mode 12AC 0 CODE 0 text2 dist/default/production/transceiver.X.production.obj
+__LnvFARRAM 0 0 FARRAM 0 nvFARRAM dist/default/production/transceiver.X.production.obj
+__size_of_print_number 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+wtemp6 4F 0 COMRAM 1 temp dist/default/production/transceiver.X.production.obj
+__CFG_EBTR0$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_EBTR1$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_usb_prepare_setup F92 0 CODE 0 text34 dist/default/production/transceiver.X.production.obj
+__CFG_EBTRB$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_handle_usb_ctrl_output E90 0 CODE 0 text15 dist/default/production/transceiver.X.production.obj
+__Hifardata 0 0 CODE 0 ifardata dist/default/production/transceiver.X.production.obj
+_data_out_packet AB 0 BANK0 1 dataBANK0 dist/default/production/transceiver.X.production.obj
+__size_of_delayMicroseconds 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_hex_table 3F03 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__Hclrtext 0 0 ABS 0 clrtext dist/default/production/transceiver.X.production.obj
+__end_of_init_usb 102C 0 CODE 0 text7 dist/default/production/transceiver.X.production.obj
+__pidataCOMRAM 130A 0 CODE 0 idataCOMRAM dist/default/production/transceiver.X.production.obj
+__end_of_usb_check_std_request 6D2 0 CODE 0 text17 dist/default/production/transceiver.X.production.obj
+_ctrl_trf_state 40 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+_ANSELH F7F 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+___inthi_sp 0 0 STACK 2 stack /tmp/xcXDnfIww.obj
+___intlo_sp 0 0 STACK 2 stack /tmp/xcXDnfIww.obj
+__LdataCOMRAM 0 0 ABS 0 dataCOMRAM dist/default/production/transceiver.X.production.obj
+__end_of_print_number 12D4 0 CODE 0 text22 dist/default/production/transceiver.X.production.obj
+__Hintcode_body 0 0 ABS 0 intcode_body dist/default/production/transceiver.X.production.obj
+_hex_table 3EF3 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__Lintsave_regs 0 0 BIGRAM 1 intsave_regs dist/default/production/transceiver.X.production.obj
+_EP0_IN 4C 0 COMRAM 1 dataCOMRAM dist/default/production/transceiver.X.production.obj
+_EP1_IN 4A 0 COMRAM 1 dataCOMRAM dist/default/production/transceiver.X.production.obj
+_EP2_IN AF 0 BANK0 1 dataBANK0 dist/default/production/transceiver.X.production.obj
+_usb_check_std_request 506 0 CODE 0 text17 dist/default/production/transceiver.X.production.obj
+_data_count 37 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__Hmediumconst 4000 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__size_of_receive_mode 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_print_byte 1154 0 CODE 0 text6 dist/default/production/transceiver.X.production.obj
+__end_of_print_hex2 FE0 0 CODE 0 text28 dist/default/production/transceiver.X.production.obj
+__Hintcodelo C6 0 CODE 0 intcodelo dist/default/production/transceiver.X.production.obj
+__end_of_print_text 11E8 0 CODE 0 text5 dist/default/production/transceiver.X.production.obj
+___lwmod@divisor A 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__end_of___lwdiv F42 0 CODE 0 text25 dist/default/production/transceiver.X.production.obj
+__end_of___lwmod 106E 0 CODE 0 text24 dist/default/production/transceiver.X.production.obj
+usb_check_std_request@type 13 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__size_of_user_endpoint_init 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_serial_out_buffer 100 0 BANK1 1 bssBANK1 dist/default/production/transceiver.X.production.obj
+__size_of_handle_usb_transaction 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_print_number_nospace 908 0 CODE 0 text23 dist/default/production/transceiver.X.production.obj
+___lwdiv@quotient 5 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__LidataCOMRAM 0 0 ABS 0 idataCOMRAM dist/default/production/transceiver.X.production.obj
+__CFG_USBDIV$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+print_number@number F 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__end_of_receive_mode 12C0 0 CODE 0 text2 dist/default/production/transceiver.X.production.obj
+___lwmod@dividend 8 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__Lintcodelo 18 0 CODE 0 intcodelo dist/default/production/transceiver.X.production.obj
+__CFG_FCMEN$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of_handle_usb_ctrl_out 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+i2_flush_uart 12E6 0 CODE 0 text18 dist/default/production/transceiver.X.production.obj
+start_initialization DB6 0 CODE 0 cinit dist/default/production/transceiver.X.production.obj
+__HnvFARRAM 0 0 FARRAM 0 nvFARRAM dist/default/production/transceiver.X.production.obj
+__end_ofi2_delayMicroseconds 1292 0 CODE 0 text20 dist/default/production/transceiver.X.production.obj
+_TRISBbits F93 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_TRISCbits F94 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_usb_prepare_setup F42 0 CODE 0 text34 dist/default/production/transceiver.X.production.obj
+__end_of_handle_usb_ctrl_input EF0 0 CODE 0 text30 dist/default/production/transceiver.X.production.obj
+__end_of_handle_usb_ctrl_setup 506 0 CODE 0 text16 dist/default/production/transceiver.X.production.obj
+_ctrl_trf_session_owner 3F 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+___rparam_used 1 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_STVREN$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_WDTPS$32768 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_usb_config1 3F03 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+_SPBRGH FB0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__pcstackBANK0 88 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+__size_of_radio_on 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_serial_out_count 82 0 BANK0 1 bssBANK0 dist/default/production/transceiver.X.production.obj
+__end_of_handle_uart 7FE 0 CODE 0 text10 dist/default/production/transceiver.X.production.obj
+_handle_usb_ctrl_input E90 0 CODE 0 text30 dist/default/production/transceiver.X.production.obj
+_handle_usb_ctrl_setup 302 0 CODE 0 text16 dist/default/production/transceiver.X.production.obj
+__end_of_delayMicroseconds 126C 0 CODE 0 text11 dist/default/production/transceiver.X.production.obj
+_UIEbits F60 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_write_radio 10B0 0 CODE 0 text4 dist/default/production/transceiver.X.production.obj
+_UIRbits F62 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Hbank0 0 0 ABS 0 bank0 dist/default/production/transceiver.X.production.obj
+__Hbank1 0 0 ABS 0 bank1 dist/default/production/transceiver.X.production.obj
+__Hbank2 0 0 ABS 0 bank2 dist/default/production/transceiver.X.production.obj
+__Hcinit 0 0 ABS 0 cinit dist/default/production/transceiver.X.production.obj
+__Hconst 0 0 CONST 0 const dist/default/production/transceiver.X.production.obj
+print_byte@c 9D 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+__Hidata 0 0 CODE 0 idata dist/default/production/transceiver.X.production.obj
+__Hidloc 200008 0 IDLOC 0 idloc dist/default/production/transceiver.X.production.obj
+__Hnvbit 0 0 COMRAM 1 nvbit dist/default/production/transceiver.X.production.obj
+__Hparam 0 0 COMRAM 1 rparam dist/default/production/transceiver.X.production.obj
+__Hrdata 0 0 COMRAM 1 rdata dist/default/production/transceiver.X.production.obj
+_serial_in_ptr 3B 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__Hstack 0 0 STACK 2 stack dist/default/production/transceiver.X.production.obj
+__Htext0 0 0 ABS 0 text0 dist/default/production/transceiver.X.production.obj
+__Htext1 0 0 ABS 0 text1 dist/default/production/transceiver.X.production.obj
+__Htext2 0 0 ABS 0 text2 dist/default/production/transceiver.X.production.obj
+__Htext3 0 0 ABS 0 text3 dist/default/production/transceiver.X.production.obj
+__Htext4 0 0 ABS 0 text4 dist/default/production/transceiver.X.production.obj
+__Htext5 0 0 ABS 0 text5 dist/default/production/transceiver.X.production.obj
+__Htext6 0 0 ABS 0 text6 dist/default/production/transceiver.X.production.obj
+__Htext7 0 0 ABS 0 text7 dist/default/production/transceiver.X.production.obj
+__Htext8 0 0 ABS 0 text8 dist/default/production/transceiver.X.production.obj
+__Htext9 0 0 ABS 0 text9 dist/default/production/transceiver.X.production.obj
+__CFG_BBSIZ$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_ofi2_flush_uart 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+___lwdiv@counter 7 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+_handle_usb_ctrl_out BA6 0 CODE 0 text26 dist/default/production/transceiver.X.production.obj
+__Hbigbss 0 0 BIGRAM 1 bigbss dist/default/production/transceiver.X.production.obj
+__Hbigram 0 0 ABS 0 bigram dist/default/production/transceiver.X.production.obj
+__smallconst 0 0 SMALLCONST 0 smallconst /tmp/xcXDnfIww.obj
+__Hcomram 0 0 ABS 0 comram dist/default/production/transceiver.X.production.obj
+__Hconfig 30000E 0 CONFIG 0 config dist/default/production/transceiver.X.production.obj
+_serial_out_ptr 39 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__Lbank0 0 0 ABS 0 bank0 dist/default/production/transceiver.X.production.obj
+__Lbank1 0 0 ABS 0 bank1 dist/default/production/transceiver.X.production.obj
+__Lbank2 0 0 ABS 0 bank2 dist/default/production/transceiver.X.production.obj
+print_number_nospace@number D 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__Lcinit 0 0 ABS 0 cinit dist/default/production/transceiver.X.production.obj
+__Lconst 0 0 CONST 0 const dist/default/production/transceiver.X.production.obj
+_usb_state 41 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__Lidata 0 0 CODE 0 idata dist/default/production/transceiver.X.production.obj
+__Lidloc 200000 0 IDLOC 0 idloc dist/default/production/transceiver.X.production.obj
+__Lnvbit 0 0 COMRAM 1 nvbit dist/default/production/transceiver.X.production.obj
+handle_usb_ctrl_out@temp 5 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__Lparam 0 0 COMRAM 1 rparam dist/default/production/transceiver.X.production.obj
+__Lrdata 0 0 COMRAM 1 rdata dist/default/production/transceiver.X.production.obj
+__size_of_handle_uart_rx 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Lstack 0 0 STACK 2 stack dist/default/production/transceiver.X.production.obj
+__Ltext0 0 0 ABS 0 text0 dist/default/production/transceiver.X.production.obj
+__Ltext1 0 0 ABS 0 text1 dist/default/production/transceiver.X.production.obj
+__Ltext2 0 0 ABS 0 text2 dist/default/production/transceiver.X.production.obj
+__Ltext3 0 0 ABS 0 text3 dist/default/production/transceiver.X.production.obj
+__Ltext4 0 0 ABS 0 text4 dist/default/production/transceiver.X.production.obj
+__Ltext5 0 0 ABS 0 text5 dist/default/production/transceiver.X.production.obj
+__Ltext6 0 0 ABS 0 text6 dist/default/production/transceiver.X.production.obj
+__Ltext7 0 0 ABS 0 text7 dist/default/production/transceiver.X.production.obj
+__Ltext8 0 0 ABS 0 text8 dist/default/production/transceiver.X.production.obj
+__Ltext9 0 0 ABS 0 text9 dist/default/production/transceiver.X.production.obj
+__Hfarbss 0 0 FARRAM 0 farbss dist/default/production/transceiver.X.production.obj
+__Lintcode_body 0 0 ABS 0 intcode_body dist/default/production/transceiver.X.production.obj
+_INTCONbits FF2 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Habs1 0 0 ABS 0 abs1 dist/default/production/transceiver.X.production.obj
+__Hdata 0 0 ABS 0 data dist/default/production/transceiver.X.production.obj
+__Hinit CA 0 CODE 0 init dist/default/production/transceiver.X.production.obj
+__Hrbit 0 0 COMRAM 1 rbit dist/default/production/transceiver.X.production.obj
+__Hrbss 0 0 COMRAM 1 rbss dist/default/production/transceiver.X.production.obj
+__Htemp 4F 0 COMRAM 1 temp dist/default/production/transceiver.X.production.obj
+__Htext 0 0 ABS 0 text dist/default/production/transceiver.X.production.obj
+__Labs1 0 0 ABS 0 abs1 dist/default/production/transceiver.X.production.obj
+__Ldata 0 0 ABS 0 data dist/default/production/transceiver.X.production.obj
+__Linit C6 0 CODE 0 init dist/default/production/transceiver.X.production.obj
+__Lrbit 0 0 COMRAM 1 rbit dist/default/production/transceiver.X.production.obj
+__Lrbss 0 0 COMRAM 1 rbss dist/default/production/transceiver.X.production.obj
+__Ltemp 4E 0 COMRAM 1 temp dist/default/production/transceiver.X.production.obj
+__Ltext 0 0 ABS 0 text dist/default/production/transceiver.X.production.obj
+__CFG_XINST$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of_handle_usb_ctrl_output 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+write_radio@i A0 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+__end_ofi2_flush_uart 12F8 0 CODE 0 text18 dist/default/production/transceiver.X.production.obj
+__LcstackBANK0 0 0 ABS 0 cstackBANK0 dist/default/production/transceiver.X.production.obj
+int$flags 4E 0 COMRAM 1 temp dist/default/production/transceiver.X.production.obj
+__HcstackCOMRAM 0 0 ABS 0 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__Hintret 0 0 ABS 0 intret dist/default/production/transceiver.X.production.obj
+__Hirdata 0 0 CODE 0 irdata dist/default/production/transceiver.X.production.obj
+_UIE F60 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UIR F62 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__S0 30000E 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__S1 200 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__S2 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_isr 8 0 CODE 0 intcode dist/default/production/transceiver.X.production.obj
+_radio_on C66 0 CODE 0 text3 dist/default/production/transceiver.X.production.obj
+i2_handle_uart 7FE 0 CODE 0 text19 dist/default/production/transceiver.X.production.obj
+__end_of_handle_usb_ctrl_in DB6 0 CODE 0 text31 dist/default/production/transceiver.X.production.obj
+_UCONbits F64 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+print_hex2@number 4 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__CFG_PLLEN$ON 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+usb_check_std_request@index 11 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__end_of_radio_on D0E 0 CODE 0 text3 dist/default/production/transceiver.X.production.obj
+_usb_config 43 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__HidataCOMRAM 0 0 ABS 0 idataCOMRAM dist/default/production/transceiver.X.production.obj
+__Lbigdata 0 0 BIGRAM 1 bigdata dist/default/production/transceiver.X.production.obj
+_data_in_packet AD 0 BANK0 1 dataBANK0 dist/default/production/transceiver.X.production.obj
+__Hnvrram 0 0 COMRAM 1 nvrram dist/default/production/transceiver.X.production.obj
+__end_of_isr AD4 0 CODE 0 intcode_body dist/default/production/transceiver.X.production.obj
+int_func A02 0 CODE 0 intcode_body dist/default/production/transceiver.X.production.obj
+_setup_out_packet 48 0 COMRAM 1 dataCOMRAM dist/default/production/transceiver.X.production.obj
+__Lintentry 0 0 ABS 0 intentry dist/default/production/transceiver.X.production.obj
+__size_of_print_byte 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of_print_hex2 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of_print_text 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Hramtop 300 0 RAM 0 ramtop dist/default/production/transceiver.X.production.obj
+print_text@s 9E 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+__Hrparam 0 0 COMRAM 1 rparam dist/default/production/transceiver.X.production.obj
+_serial_in_ptr2 84 0 BANK0 1 bssBANK0 dist/default/production/transceiver.X.production.obj
+__pdataBANK0 AB 0 BANK0 1 dataBANK0 dist/default/production/transceiver.X.production.obj
+__CFG_PWRTEN$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__activetblptr 3 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Hstruct 0 0 COMRAM 1 struct dist/default/production/transceiver.X.production.obj
+_delayMicroseconds 1242 0 CODE 0 text11 dist/default/production/transceiver.X.production.obj
+__LbssBANK0 0 0 ABS 0 bssBANK0 dist/default/production/transceiver.X.production.obj
+__LbssBANK1 0 0 ABS 0 bssBANK1 dist/default/production/transceiver.X.production.obj
+__Htext10 0 0 ABS 0 text10 dist/default/production/transceiver.X.production.obj
+__Htext11 0 0 ABS 0 text11 dist/default/production/transceiver.X.production.obj
+__Htext14 0 0 ABS 0 text14 dist/default/production/transceiver.X.production.obj
+__Htext15 0 0 ABS 0 text15 dist/default/production/transceiver.X.production.obj
+__Htext16 0 0 ABS 0 text16 dist/default/production/transceiver.X.production.obj
+__Htext17 0 0 ABS 0 text17 dist/default/production/transceiver.X.production.obj
+__Htext18 0 0 ABS 0 text18 dist/default/production/transceiver.X.production.obj
+__Htext19 0 0 ABS 0 text19 dist/default/production/transceiver.X.production.obj
+__Htext20 0 0 ABS 0 text20 dist/default/production/transceiver.X.production.obj
+__Htext21 0 0 ABS 0 text21 dist/default/production/transceiver.X.production.obj
+__Htext22 0 0 ABS 0 text22 dist/default/production/transceiver.X.production.obj
+__Htext23 0 0 ABS 0 text23 dist/default/production/transceiver.X.production.obj
+__Htext24 0 0 ABS 0 text24 dist/default/production/transceiver.X.production.obj
+__Htext25 0 0 ABS 0 text25 dist/default/production/transceiver.X.production.obj
+__Htext26 0 0 ABS 0 text26 dist/default/production/transceiver.X.production.obj
+__Htext27 0 0 ABS 0 text27 dist/default/production/transceiver.X.production.obj
+__Htext28 0 0 ABS 0 text28 dist/default/production/transceiver.X.production.obj
+__Htext29 0 0 ABS 0 text29 dist/default/production/transceiver.X.production.obj
+__Htext30 0 0 ABS 0 text30 dist/default/production/transceiver.X.production.obj
+__Htext31 0 0 ABS 0 text31 dist/default/production/transceiver.X.production.obj
+__Htext32 0 0 ABS 0 text32 dist/default/production/transceiver.X.production.obj
+__Htext33 0 0 ABS 0 text33 dist/default/production/transceiver.X.production.obj
+__Htext34 0 0 ABS 0 text34 dist/default/production/transceiver.X.production.obj
+__Htext35 0 0 ABS 0 text35 dist/default/production/transceiver.X.production.obj
+_serial_out_ptr2 80 0 BANK0 1 bssBANK0 dist/default/production/transceiver.X.production.obj
+_handle_usb_ctrl_in D0E 0 CODE 0 text31 dist/default/production/transceiver.X.production.obj
+_RCSTAbits FAB 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_PIE1bits F9D 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_PIE2bits FA0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_CPUDIV$NOCLKDIV 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+init_usb@i 9D 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+__CFG_HFOFST$ON 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_init_uart 12AC 0 CODE 0 text8 dist/default/production/transceiver.X.production.obj
+__ptext10 6D2 0 CODE 0 text10 dist/default/production/transceiver.X.production.obj
+__ptext11 1242 0 CODE 0 text11 dist/default/production/transceiver.X.production.obj
+__ptext14 1154 0 CODE 0 text14 dist/default/production/transceiver.X.production.obj
+__ptext15 E2C 0 CODE 0 text15 dist/default/production/transceiver.X.production.obj
+__ptext16 302 0 CODE 0 text16 dist/default/production/transceiver.X.production.obj
+__ptext17 506 0 CODE 0 text17 dist/default/production/transceiver.X.production.obj
+__ptext18 12E6 0 CODE 0 text18 dist/default/production/transceiver.X.production.obj
+__ptext19 7FE 0 CODE 0 text19 dist/default/production/transceiver.X.production.obj
+__ptext20 126C 0 CODE 0 text20 dist/default/production/transceiver.X.production.obj
+__ptext21 AD4 0 CODE 0 text21 dist/default/production/transceiver.X.production.obj
+__ptext22 12C0 0 CODE 0 text22 dist/default/production/transceiver.X.production.obj
+__ptext23 908 0 CODE 0 text23 dist/default/production/transceiver.X.production.obj
+__ptext24 102C 0 CODE 0 text24 dist/default/production/transceiver.X.production.obj
+__ptext25 EF0 0 CODE 0 text25 dist/default/production/transceiver.X.production.obj
+__ptext26 BA6 0 CODE 0 text26 dist/default/production/transceiver.X.production.obj
+__ptext27 11E8 0 CODE 0 text27 dist/default/production/transceiver.X.production.obj
+__ptext28 F92 0 CODE 0 text28 dist/default/production/transceiver.X.production.obj
+__ptext29 1186 0 CODE 0 text29 dist/default/production/transceiver.X.production.obj
+__ptext30 E90 0 CODE 0 text30 dist/default/production/transceiver.X.production.obj
+__ptext31 D0E 0 CODE 0 text31 dist/default/production/transceiver.X.production.obj
+__ptext32 12F8 0 CODE 0 text32 dist/default/production/transceiver.X.production.obj
+__ptext33 10EA 0 CODE 0 text33 dist/default/production/transceiver.X.production.obj
+__ptext34 F42 0 CODE 0 text34 dist/default/production/transceiver.X.production.obj
+__ptext35 106E 0 CODE 0 text35 dist/default/production/transceiver.X.production.obj
+__CFG_PCLKEN$ON 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of_init_uart 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_handle_usb_ctrl_out C66 0 CODE 0 text26 dist/default/production/transceiver.X.production.obj
+_BAUDCTL FB8 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__pintcode_body A02 0 CODE 0 intcode_body dist/default/production/transceiver.X.production.obj
+___lwdiv EF0 0 CODE 0 text25 dist/default/production/transceiver.X.production.obj
+___lwmod 102C 0 CODE 0 text24 dist/default/production/transceiver.X.production.obj
+__Lbigbss 0 0 BIGRAM 1 bigbss dist/default/production/transceiver.X.production.obj
+__Lbigram 0 0 ABS 0 bigram dist/default/production/transceiver.X.production.obj
+__CFG_BORV$19 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Lcomram 0 0 ABS 0 comram dist/default/production/transceiver.X.production.obj
+__Lconfig 300000 0 CONFIG 0 config dist/default/production/transceiver.X.production.obj
+__CFG_WDTEN$ON 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_LATBbits F8A 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_LATCbits F8B 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_transmit_mode 1216 0 CODE 0 text1 dist/default/production/transceiver.X.production.obj
+_EP0_OUT B3 0 BANK0 1 dataBANK0 dist/default/production/transceiver.X.production.obj
+_EP2_OUT B1 0 BANK0 1 dataBANK0 dist/default/production/transceiver.X.production.obj
+__size_of_usb_check_std_request 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+main@fragment AA 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+__size_of_handle_uart 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Lfarbss 0 0 FARRAM 0 farbss dist/default/production/transceiver.X.production.obj
+_usb_descriptor 3F7F 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+___lwdiv@divisor 3 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+main@i_919 A9 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+_init_uart 1292 0 CODE 0 text8 dist/default/production/transceiver.X.production.obj
+__Lfardata 0 0 FARRAM 0 fardata dist/default/production/transceiver.X.production.obj
+_handle_usb_transaction 1154 0 CODE 0 text14 dist/default/production/transceiver.X.production.obj
+stackhi 2FF 0 ABS 0 - /tmp/xcXDnfIww.obj
+stacklo 200 0 ABS 0 - /tmp/xcXDnfIww.obj
+__Lintcode 8 0 CODE 0 intcode dist/default/production/transceiver.X.production.obj
+handle_usb_ctrl_in@fragment 5 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__Lintret 0 0 ABS 0 intret dist/default/production/transceiver.X.production.obj
+__Lirdata 0 0 CODE 0 irdata dist/default/production/transceiver.X.production.obj
+__size_ofi2_handle_uart 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_LVP$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_flush_uart 12D4 0 CODE 0 text9 dist/default/production/transceiver.X.production.obj
+__Lspace_0 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Lspace_1 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Lspace_2 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__pbssCOMRAM 34 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__HcstackBANK0 0 0 ABS 0 cstackBANK0 dist/default/production/transceiver.X.production.obj
+_data_ptr 34 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+_PIR1bits F9E 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_PIR2bits FA1 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__LcstackCOMRAM 0 0 ABS 0 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+end_of_initialization E22 0 CODE 0 cinit dist/default/production/transceiver.X.production.obj
+i2_print_byte 1186 0 CODE 0 text29 dist/default/production/transceiver.X.production.obj
+i2_print_text 11E8 0 CODE 0 text27 dist/default/production/transceiver.X.production.obj
+__Lnvrram 0 0 COMRAM 1 nvrram dist/default/production/transceiver.X.production.obj
+__Hintentry 0 0 ABS 0 intentry dist/default/production/transceiver.X.production.obj
+___lwdiv@dividend 1 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+?___lwdiv 1 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+?___lwmod 8 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+_handle_usb_reset 10EA 0 CODE 0 text33 dist/default/production/transceiver.X.production.obj
+_handle_usb_stall 12F8 0 CODE 0 text32 dist/default/production/transceiver.X.production.obj
+__end_of_usb_config1 3F49 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__Hreset_vec 4 0 CODE 0 reset_vec dist/default/production/transceiver.X.production.obj
+_serial_in_count 3D 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__HbssBANK0 0 0 ABS 0 bssBANK0 dist/default/production/transceiver.X.production.obj
+__HbssBANK1 0 0 ABS 0 bssBANK1 dist/default/production/transceiver.X.production.obj
+__Lramtop 300 0 RAM 0 ramtop dist/default/production/transceiver.X.production.obj
+delayMicroseconds@i 9F 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+delayMicroseconds@x 9D 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+__end_ofi2_handle_uart 908 0 CODE 0 text19 dist/default/production/transceiver.X.production.obj
+__Lrparam 0 0 COMRAM 1 rparam dist/default/production/transceiver.X.production.obj
+__pcinit DB6 0 CODE 0 cinit dist/default/production/transceiver.X.production.obj
+__end_of_usb_descriptor 3F91 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__ptext0 CA 0 CODE 0 text0 dist/default/production/transceiver.X.production.obj
+__ptext1 1216 0 CODE 0 text1 dist/default/production/transceiver.X.production.obj
+__ptext2 12AC 0 CODE 0 text2 dist/default/production/transceiver.X.production.obj
+__ptext3 C66 0 CODE 0 text3 dist/default/production/transceiver.X.production.obj
+__ptext4 10B0 0 CODE 0 text4 dist/default/production/transceiver.X.production.obj
+__ptext5 11B8 0 CODE 0 text5 dist/default/production/transceiver.X.production.obj
+__ptext6 1120 0 CODE 0 text6 dist/default/production/transceiver.X.production.obj
+__ptext7 FE0 0 CODE 0 text7 dist/default/production/transceiver.X.production.obj
+__ptext8 1292 0 CODE 0 text8 dist/default/production/transceiver.X.production.obj
+__ptext9 12D4 0 CODE 0 text9 dist/default/production/transceiver.X.production.obj
+__Lstruct 0 0 COMRAM 1 struct dist/default/production/transceiver.X.production.obj
+__Ltext10 0 0 ABS 0 text10 dist/default/production/transceiver.X.production.obj
+__Ltext11 0 0 ABS 0 text11 dist/default/production/transceiver.X.production.obj
+__Ltext14 0 0 ABS 0 text14 dist/default/production/transceiver.X.production.obj
+__Ltext15 0 0 ABS 0 text15 dist/default/production/transceiver.X.production.obj
+__Ltext16 0 0 ABS 0 text16 dist/default/production/transceiver.X.production.obj
+__Ltext17 0 0 ABS 0 text17 dist/default/production/transceiver.X.production.obj
+__Ltext18 0 0 ABS 0 text18 dist/default/production/transceiver.X.production.obj
+__Ltext19 0 0 ABS 0 text19 dist/default/production/transceiver.X.production.obj
+__Ltext20 0 0 ABS 0 text20 dist/default/production/transceiver.X.production.obj
+__Ltext21 0 0 ABS 0 text21 dist/default/production/transceiver.X.production.obj
+__Ltext22 0 0 ABS 0 text22 dist/default/production/transceiver.X.production.obj
+__Ltext23 0 0 ABS 0 text23 dist/default/production/transceiver.X.production.obj
+__Ltext24 0 0 ABS 0 text24 dist/default/production/transceiver.X.production.obj
+__Ltext25 0 0 ABS 0 text25 dist/default/production/transceiver.X.production.obj
+__Ltext26 0 0 ABS 0 text26 dist/default/production/transceiver.X.production.obj
+__Ltext27 0 0 ABS 0 text27 dist/default/production/transceiver.X.production.obj
+__Ltext28 0 0 ABS 0 text28 dist/default/production/transceiver.X.production.obj
+__Ltext29 0 0 ABS 0 text29 dist/default/production/transceiver.X.production.obj
+__Ltext30 0 0 ABS 0 text30 dist/default/production/transceiver.X.production.obj
+__Ltext31 0 0 ABS 0 text31 dist/default/production/transceiver.X.production.obj
+__Ltext32 0 0 ABS 0 text32 dist/default/production/transceiver.X.production.obj
+__Ltext33 0 0 ABS 0 text33 dist/default/production/transceiver.X.production.obj
+__Ltext34 0 0 ABS 0 text34 dist/default/production/transceiver.X.production.obj
+__Ltext35 0 0 ABS 0 text35 dist/default/production/transceiver.X.production.obj
+__ramtop 300 0 RAM 0 ramtop /tmp/xcXDnfIww.obj
+__Lpowerup C6 0 CODE 0 powerup dist/default/production/transceiver.X.production.obj
+__size_of_handle_usb_ctrl_input 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Leeprom_data 0 0 EEDATA 0 eeprom_data dist/default/production/transceiver.X.production.obj
+__end_of_write_radio 10EA 0 CODE 0 text4 dist/default/production/transceiver.X.production.obj
+__size_of_handle_usb_ctrl_setup 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+handle_usb_ctrl_setup@length 19 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__size_of_print_number_nospace 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Lreset_vec 0 0 CODE 0 reset_vec dist/default/production/transceiver.X.production.obj
+__end_of_user_endpoint_init BA6 0 CODE 0 text21 dist/default/production/transceiver.X.production.obj
+__CFG_FOSC$XT 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_flush_uart 12E6 0 CODE 0 text9 dist/default/production/transceiver.X.production.obj
+__size_ofi2_print_byte 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_ofi2_print_text 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_cdc_in_packet 44 0 COMRAM 1 dataCOMRAM dist/default/production/transceiver.X.production.obj
+___param_bank 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Hbigdata 0 0 BIGRAM 1 bigdata dist/default/production/transceiver.X.production.obj
+__end_of__initialization E22 0 CODE 0 cinit dist/default/production/transceiver.X.production.obj
+__CFG_WRT0$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_WRT1$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of_transmit_mode 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_WRTB$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Libigdata 0 0 CODE 0 ibigdata dist/default/production/transceiver.X.production.obj
+__CFG_WRTC$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_WRTD$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_handle_usb_ctrl_output E2C 0 CODE 0 text15 dist/default/production/transceiver.X.production.obj
+__pidataBANK0 1314 0 CODE 0 idataBANK0 dist/default/production/transceiver.X.production.obj
+usb_check_std_request@request 12 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__Lclrtext 0 0 ABS 0 clrtext dist/default/production/transceiver.X.production.obj
+__end_of_print_number_nospace A02 0 CODE 0 text23 dist/default/production/transceiver.X.production.obj
+i2handle_uart@bits 5 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+handle_usb_ctrl_output@temp 1F 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__pintcodelo 18 0 CODE 0 intcodelo dist/default/production/transceiver.X.production.obj
+__pcstackCOMRAM 1 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+_TXSTAbits FAC 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__pmediumconst 3EF2 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__end_ofi2_print_byte 11B8 0 CODE 0 text29 dist/default/production/transceiver.X.production.obj
+__end_ofi2_print_text 1216 0 CODE 0 text27 dist/default/production/transceiver.X.production.obj
+_handle_uart_rx 106E 0 CODE 0 text35 dist/default/production/transceiver.X.production.obj
+__CFG_BOREN$SBORDIS 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_serial_in_buffer 60 0 BANK0 1 bssBANK0 dist/default/production/transceiver.X.production.obj
+__end_of_isr1 C6 0 CODE 0 intcodelo dist/default/production/transceiver.X.production.obj
+__end_of_main 302 0 CODE 0 text0 dist/default/production/transceiver.X.production.obj
+_user_endpoint_init AD4 0 CODE 0 text21 dist/default/production/transceiver.X.production.obj
+__pintcode 8 0 CODE 0 intcode dist/default/production/transceiver.X.production.obj
+handle_uart@bits A1 0 BANK0 1 cstackBANK0 dist/default/production/transceiver.X.production.obj
+i2print_byte@c 1 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+_ANSEL F7E 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+handle_uart_rx@c 1 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+_RCREG FAE 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_RCSTA FAB 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_SPBRG FAF 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_T0CON FD5 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_TXREG FAD 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_TXSTA FAC 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_UADDR F5C 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_USTAT F63 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_sd000 3F9F 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__end_of_sd001 3F7F 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__end_of_sd002 3F69 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__size_of_usb_prepare_setup 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__end_of_transmit_mode 1242 0 CODE 0 text1 dist/default/production/transceiver.X.production.obj
+__CFG_CP0$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_CP1$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__HRAM 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Hbss 0 0 RAM 1 bss dist/default/production/transceiver.X.production.obj
+__Hram 0 0 ABS 0 ram dist/default/production/transceiver.X.production.obj
+__Hsfr 0 0 ABS 0 sfr dist/default/production/transceiver.X.production.obj
+__LRAM 1 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__Lbss 0 0 RAM 1 bss dist/default/production/transceiver.X.production.obj
+__Lram 0 0 ABS 0 ram dist/default/production/transceiver.X.production.obj
+__Lsfr 0 0 ABS 0 sfr dist/default/production/transceiver.X.production.obj
+_flags 42 0 COMRAM 1 bssCOMRAM dist/default/production/transceiver.X.production.obj
+__CFG_CPB$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__CFG_CPD$OFF 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+_sd000 3F9B 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+_sd001 3F69 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+_sd002 3F49 0 MEDIUMCONST 0 mediumconst dist/default/production/transceiver.X.production.obj
+__end_of_handle_usb_reset 1120 0 CODE 0 text33 dist/default/production/transceiver.X.production.obj
+__end_of_handle_usb_stall 130A 0 CODE 0 text32 dist/default/production/transceiver.X.production.obj
+__size_of_isr 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__HdataBANK0 0 0 ABS 0 dataBANK0 dist/default/production/transceiver.X.production.obj
+__size_of_handle_usb_ctrl_in 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+handle_usb_ctrl_setup@type 1E 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__size_of_handle_usb_reset 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+__size_of_handle_usb_stall 0 0 ABS 0 - dist/default/production/transceiver.X.production.obj
+handle_usb_ctrl_setup@length_840 1C 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__initialization DB6 0 CODE 0 cinit dist/default/production/transceiver.X.production.obj
+__pbssBANK0 60 0 BANK0 1 bssBANK0 dist/default/production/transceiver.X.production.obj
+__pbssBANK1 100 0 BANK1 1 bssBANK1 dist/default/production/transceiver.X.production.obj
+__pdataCOMRAM 44 0 COMRAM 1 dataCOMRAM dist/default/production/transceiver.X.production.obj
+handle_usb_ctrl_setup@command 1B 0 COMRAM 1 cstackCOMRAM dist/default/production/transceiver.X.production.obj
+__end_of_handle_usb_transaction 1186 0 CODE 0 text14 dist/default/production/transceiver.X.production.obj
+__Hfardata 0 0 FARRAM 0 fardata dist/default/production/transceiver.X.production.obj
+__Hsmallconst 0 0 SMALLCONST 0 smallconst dist/default/production/transceiver.X.production.obj
+__Lifardata 0 0 CODE 0 ifardata dist/default/production/transceiver.X.production.obj
+_handle_uart 6D2 0 CODE 0 text10 dist/default/production/transceiver.X.production.obj
+__Hintsave_regs 0 0 BIGRAM 1 intsave_regs dist/default/production/transceiver.X.production.obj
+__Hintcode E 0 CODE 0 intcode dist/default/production/transceiver.X.production.obj
+# %SPLITSTAB Section
+# This section enumerates all the psect splits performed by the assembler.
+# The beginning of the section is indicated by %SPLITSTAB.
+# Each line is a record a particular split, where the parent psect is on
+# the left and the child on the right.  Note that a child psect is always
+# split form the top of the parent psect. All splits from a given parent
+# are listed in the order in which they occurred.
+%SPLITSTAB
+# %DABS Section
+# This section contains a table of all usuage of the assember
+# directive DABS in the program. Each line has the following format:
+#   <name> <space> <address> <size>
+# If the DABS was originally labelled then that shall be <name>,
+# otherwise name will be "-".  The <space> number is in decimal.
+# <address> and <size> are in byte units as unqaulified hexadecimal
+%DABS
+# %SEGMENTS Section
+# This sections enumerates the segments of the program.  Each segment
+# is described on a single line as follows:
+#    <name> <space> <link address> <file address> <size> <delta>
+# Addresses and size are in unqualified hexadecimal.  The link address
+# and size are in units of delta. The file address is in units of bytes.
+# All other numeric quantities are in decimal.
+%SEGMENTS
+intcodelo 0 18 18 1306 1
+idloc 0 200000 200000 8 1
+cstackCOMRAM 1 1 1 4E 1
+reset_vec 0 0 0 4 1
+bssBANK0 1 60 60 55 1
+bssBANK1 1 100 100 100 1
+intcode 0 8 8 6 1
+mediumconst 0 3EF2 3EF2 10E 1
+config 0 300000 300000 E 1
