@@ -14,7 +14,8 @@ import android.view.MotionEvent;
 public class Button {
     int centerX;
     int centerY;
-    Rect rect;
+    Rect rect = new Rect();
+    Rect textSize = new Rect();
     String text = "";
 
     static final int NO_ARROW = 0;
@@ -54,8 +55,8 @@ public class Button {
     {
         this.centerX = centerX;
         this.centerY = centerY;
-        this.rect = calculateRect(text, centerX, centerY);
         this.text = text;
+        calculateRect();
     }
 
     // calculate arrow extents
@@ -68,42 +69,56 @@ public class Button {
         return result;
     }
 
-    static Rect calculateRect(String text, int centerX, int centerY)
+    // calculate button extents wkth text
+    void calculateRect()
     {
-        Rect result = new Rect();
-        Rect textRect = calculateSize(text);
+        Rect size = calculateSize(text, textSize);
+        rect.top = centerY - size.height() / 2;
+        rect.bottom = rect.top + size.height();
+        rect.left = centerX - size.width() / 2;
+        rect.right = rect.left + size.width();
 
-        int textW = textRect.right - textRect.left;
-        int textH = textRect.bottom - textRect.top;
-        result.top = centerY - textW / 2 - MARGIN;
-        result.bottom = result.top + textW + MARGIN * 2;
-        result.left = centerX - textH / 2 - MARGIN;
-        result.right = result.left + textH + MARGIN * 2;
+
 //        Log.i("Button", "textSize=" + textRect.top + " " + textRect.bottom + " " + textRect.left + " " + textRect.right);
 //        Log.i("Button", "center=" + centerX + " " + centerY);
 //        Log.i("Button", "rect=" + result.top + " " + result.bottom + " " + result.left + " " + result.right);
-
-        return result;
     }
 
-    static Rect calculateSize(String text)
+    // return size
+    static Rect calculateSize(String text, Rect textSize)
     {
+        if(textSize == null)
+        {
+            textSize = new Rect();
+        }
+
         Paint p = new Paint();
-        Rect text_size = new Rect();
         p.setStyle(Paint.Style.FILL);
         p.setTypeface(Typeface.create("SansSerif", Typeface.BOLD));
         p.setTextSize(FirstFragment.TEXT_SIZE);
         p.getTextBounds(text,
                 0,
                 text.length(),
-                text_size);
-        return text_size;
+                textSize);
+
+        Rect size = new Rect();
+        if(FirstFragment.landscape)
+        {
+            size.bottom = textSize.width() + MARGIN * 2;
+            size.right = textSize.height() + MARGIN * 2;
+        }
+        else
+        {
+            size.bottom = textSize.height() + MARGIN * 2;
+            size.right = textSize.width() + MARGIN * 2;
+        }
+        return size;
     }
 
     public boolean updateText(String text) {
         if(!this.text.equals(text)) {
             this.text = text;
-            this.rect = calculateRect(text, centerX, centerY);
+            calculateRect();
             return true;
         }
         return false;
@@ -201,28 +216,30 @@ public class Button {
                 p.setStyle(Paint.Style.FILL);
                 p.setTypeface(Typeface.create("SansSerif", Typeface.BOLD));
                 p.setTextSize(FirstFragment.TEXT_SIZE);
-                Rect text_size = new Rect();
-                p.getTextBounds(text,
-                        0,
-                        text.length(),
-                        text_size);
-                // make a temporary canvas for rotating the text
-                Bitmap temp2 = Bitmap.createBitmap(text_size.width(), text_size.height(), Bitmap.Config.ARGB_8888);
-                Canvas temp = new Canvas(temp2);
-                temp.drawText(text, 0, temp.getHeight() - text_size.bottom, p);
 
-                // rotate & draw it
-                Matrix matrix = new Matrix();
-                matrix.reset();
-                //matrix.postTranslate(-temp.getWidth() / 2,
-                //        -temp.getHeight() / 2); // Centers image
-                matrix.postRotate(90);
-                matrix.postTranslate(temp.getHeight() / 2 + (rect.left + rect.right) / 2,
-                        -temp.getWidth() / 2 + (rect.top + rect.bottom) / 2);
-                canvas.drawBitmap(temp2,
-                        matrix,
-                        p);
+                if(FirstFragment.landscape) {
+                    // make a temporary canvas for rotating the text
+                    Bitmap temp2 = Bitmap.createBitmap(textSize.width(), textSize.height(), Bitmap.Config.ARGB_8888);
+                    Canvas temp = new Canvas(temp2);
+                    temp.drawText(text, 0, temp.getHeight() - textSize.bottom, p);
 
+                    // rotate & draw it
+                    Matrix matrix = new Matrix();
+                    matrix.reset();
+                    matrix.postRotate(90);
+                    matrix.postTranslate(temp.getHeight() / 2 + (rect.left + rect.right) / 2,
+                            -temp.getWidth() / 2 + (rect.top + rect.bottom) / 2);
+                    canvas.drawBitmap(temp2,
+                            matrix,
+                            p);
+                }
+                else
+                {
+                    canvas.drawText(text, (rect.left + rect.right) / 2 - textSize.width() / 2,
+                            rect.bottom - textSize.bottom - MARGIN,
+                            p);
+
+                }
             }
         }
     }

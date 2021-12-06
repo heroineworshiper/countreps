@@ -78,7 +78,8 @@ class ClientThread implements Runnable {
     }
 
     private void handleStatus() {
-        if(fragment.currentOperation != fragment.prevOperation)
+        if(fragment.currentOperation != fragment.prevOperation ||
+            fragment.prevLandscape != fragment.landscape)
         {
             fragment.changeOperation();
         }
@@ -236,13 +237,15 @@ class ClientThread implements Runnable {
                                         else if(type == STATUS)
                                         {
                                             fragment.prevOperation = fragment.currentOperation;
+                                            fragment.prevLandscape = fragment.landscape;
+
                                             fragment.currentOperation = packet[0];
                                             fragment.pan = read_int32(packet, 2);
                                             fragment.tilt = read_int32(packet, 6);
                                             fragment.pan_sign = packet[10];
                                             fragment.tilt_sign = packet[11];
                                             fragment.lens = packet[12];
-                                            fragment.landscape = packet[13];
+                                            fragment.landscape = (packet[13] == 1 ? true : false);
                                             fragment.errors = packet[14] & 0xff;
 
                                             Log.i("ClientThread", "GET_DATA" +
@@ -254,6 +257,7 @@ class ClientThread implements Runnable {
                                                     " lens=" + fragment.lens +
                                                     " landscape=" + fragment.landscape +
                                                     " errors=" + fragment.errors);
+
                                             handleStatus();
                                         }
 
