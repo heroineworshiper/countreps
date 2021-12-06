@@ -1,4 +1,5 @@
 What you'll find here:
+
 countreps: rep counter using machine vision
 tracker: camera tracker using machine vision
 
@@ -9,12 +10,20 @@ make countreps
 Compiling tracker is a matter of
 
 make tracker
+make servos
 
 Building servos.X requires mplab.
+servos runs on an atmega & must be programmed with instructions in servos.c
 
-servos ran on an atmega & must be programmed with instructions in servos.c
 
-make servos
+
+TODO:
+Don't save new home position after tracking
+portrait mounting plate
+Bolt with knob & tool for portrait mode.
+Lens mount
+PWM text is centered instead of left justified
+
 
 Tracker: the android interface for the tracker
 

@@ -70,18 +70,19 @@ OBJS := \
 	countreps.o \
 	gui.o 
 
+TRACKER_OBJS := \
+	tracker.o \
+	trackerx11.o \
+	trackerserver.o
+
 countreps: $(OBJS)
 	$(CC) -o countreps $(OBJS) $(LFLAGS)
 
-$(OBJS):
-	$(CC) $(CFLAGS) -c $< -o $*.o
-
+tracker: $(TRACKER_OBJS)
+	$(CC) -O2 -o tracker $(TRACKER_OBJS) $(LFLAGS)
 
 test: test.c
 	gcc -o test test.c
-
-tracker: tracker.c
-	$(CC) -O2 -o tracker tracker.c $(CFLAGS) $(LFLAGS)
 
 
 # compile servos
@@ -99,11 +100,22 @@ servos_fuse:
 	$(AVR_DUDE) -Ulock:w:0x3F:m -Uefuse:w:0x05:m
 
 
+#clean:
+#	rm -f countreps tracker *.o
+
 clean:
-	rm -f countreps *.o
+	rm -f tracker *.o
+
+$(OBJS):
+	$(CC) $(CFLAGS) -c $< -o $*.o
+
+$(TRACKER_OBJS):
+	$(CC) $(CFLAGS) -c $< -o $*.o
 
 countreps.o: countreps.c
 gui.o: gui.c
-
+tracker.o: tracker.c
+trackerx11.o: trackerx11.c
+trackerserver.o: trackerserver.c
 
 

@@ -1,6 +1,6 @@
 /*
  * tracking camera
- * Copyright (C) 2019-2020 Adam Williams <broadcast at earthling dot net>
+ * Copyright (C) 2019-2021 Adam Williams <broadcast at earthling dot net>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -57,9 +57,7 @@
 #include <signal.h>
 #include <linux/videodev2.h>
 
-#include "guicast.h"
-#include "keys.h"
-#include "mutex.h"
+#include "tracker.h"
 
 // load frames from test_input
 //#define LOAD_TEST_INPUT
@@ -70,22 +68,18 @@
 // use HDMI capture as input
 #define LOAD_HDMI
 // not supported.  Slows framerate to 5fps
-//    #define RECORD_HDMI
-
-// type of servo board
-//#define USE_ATMEGA // atmega at 16Mhz
-#define USE_PIC // 18f14k50 at 48Mhz
+//    #define RAW_HDMI
 
 
 
 
 
-// save openpose output in test_output
+// save openpose output in test_output as jpg files
 //#define SAVE_OUTPUT
 // output photos go here
     #define OUTPATH "test_output"
 // save openpose output in an mp4 file
-#define SAVE_OUTPUT2
+//#define SAVE_OUTPUT2
     #define OUTPATH2 "output.mp4"
 
 // tilt tracking is optional
@@ -93,27 +87,6 @@
 
 // maximum humans to track
 #define MAX_HUMANS 2
-
-#ifdef USE_ATMEGA
-// PWM limits
-    #define MIN_PWM 1000 
-    #define MAX_PWM 32700
-// PWM allowed beyond starting point for tracking
-    #define TILT_MAG 1500
-    #define PAN_MAG 5000
-// starting values
-    #define PAN0 18676
-    #define TILT0 21076
-#endif
-
-#ifdef USE_PIC
-    #define MIN_PWM 733
-    #define MAX_PWM 24000 
-    #define TILT_MAG 1100
-    #define PAN_MAG 3700
-    #define PAN0 14007
-    #define TILT0 15807
-#endif
 
 
 
@@ -124,36 +97,8 @@
 #define MODELS "../openpose/models/"
 #endif
 
-#define TEXTLEN 1024
-#define BODY_PARTS 25
 
-#define CLAMP(x, y, z) ((x) = ((x) < (y) ? (y) : ((x) > (z) ? (z) : (x))))
-#define TO_MS(x) ((x).tv_sec * 1000 + (x).tv_usec / 1000)
 
-// different parameters for different lenses
-#define LENS_15 0
-#define LENS_28 1
-#define LENS_50 2
-#define TOTAL_LENSES 3
-
-typedef struct
-{
-// manual PWM step
-    int pan_step;
-    int tilt_step;
-// PID gain converts a percent into a PWM step
-    float x_gain;
-    float y_gain;
-// Limit of PWM changes
-    int max_tilt_change;
-    int max_pan_change;
-// Fixed Y error when head is above frame in percent
-    float tilt_search;
-// deadband in percent
-    float deadband;
-// top_y in percent
-    float top_y;
-} lens_t;
 
 lens_t lenses[] = 
 {
@@ -277,49 +222,41 @@ typedef struct
 static body_t bodies[MAX_HUMANS];
 
 // raw PWM values
-static float pan = PAN0;
-static float tilt = TILT0;
-static float start_pan = pan;
-static float start_tilt = tilt;
-static int pan_sign = 1;
-static int tilt_sign = 1;
-static int lens = LENS_15;
-static int landscape = 1;
+float pan = PAN0;
+float tilt = TILT0;
+float start_pan = pan;
+float start_tilt = tilt;
+int pan_sign = 1;
+int tilt_sign = 1;
+int lens = LENS_15;
+int landscape = 1;
 
 static int servo_fd = -1;
 static int frames = 0;
 static FILE *ffmpeg_fd = 0;
 
-#define STARTUP 0
-#define CONFIGURING 1
-#define TRACKING 2
-static int current_operation = STARTUP;
+int current_operation = STARTUP;
 static int have_time1 = 0;
-
-// hard coded for testing on a bigger monitor
-#define WINDOW_W 1920
-#define WINDOW_H 1080
-#define MARGIN 10
-
-
+uint8_t error_flags = 0xff;
 
 int init_serial(const char *path)
 {
 	struct termios term;
+    int verbose = 0;
 
-	printf("init_serial %d: opening %s\n", __LINE__, path);
+	if(verbose) printf("init_serial %d: opening %s\n", __LINE__, path);
 
 // Initialize serial port
 	int fd = open(path, O_RDWR | O_NOCTTY | O_SYNC);
 	if(fd < 0)
 	{
-		printf("init_serial %d: path=%s: %s\n", __LINE__, path, strerror(errno));
+		if(verbose) printf("init_serial %d: path=%s: %s\n", __LINE__, path, strerror(errno));
 		return -1;
 	}
 	
 	if (tcgetattr(fd, &term))
 	{
-		printf("init_serial %d: path=%s %s\n", __LINE__, path, strerror(errno));
+		if(verbose) printf("init_serial %d: path=%s %s\n", __LINE__, path, strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -354,7 +291,7 @@ int init_serial(const char *path)
  */
 	if(tcsetattr(fd, TCSANOW, &term))
 	{
-		printf("init_serial %d: path=%s %s\n", __LINE__, path, strerror(errno));
+		if(verbose) printf("init_serial %d: path=%s %s\n", __LINE__, path, strerror(errno));
 		close(fd);
 		return -1;
 	}
@@ -366,55 +303,78 @@ int init_serial(const char *path)
 
 void* servo_reader(void *ptr)
 {
-    printf("servo_reader %d\n", __LINE__);
+//    printf("servo_reader %d\n", __LINE__);
+    int servos = 0;
 
     while(1)
     {
-        uint8_t buffer;
-        int bytes_read = read(servo_fd, &buffer, 1);
-        if(bytes_read <= 0)
+// open the device
+        if(servo_fd < 0)
         {
-            printf("servo_reader %d: servos unplugged\n", __LINE__);
-            return 0;
+#ifdef __clang__
+            servo_fd = init_serial("/dev/cu.usbserial-AL03OO1F");
+#else
+    #ifdef USE_ATMEGA
+	        servo_fd = init_serial("/dev/ttyUSB0");
+	        if(servo_fd < 0) servo_fd = init_serial("/dev/ttyUSB1");
+	        if(servo_fd < 0) servo_fd = init_serial("/dev/ttyUSB2");
+    #endif
+
+    #ifdef USE_PIC
+	        servo_fd = init_serial("/dev/ttyACM0");
+	        if(servo_fd < 0) servo_fd = init_serial("/dev/ttyACM1");
+	        if(servo_fd < 0) servo_fd = init_serial("/dev/ttyACM2");
+    #endif
+
+#endif
         }
-        printf("%c", buffer);
-        fflush(stdout);
+
+        if(servo_fd >= 0)
+        {
+            if((error_flags & SERVO_ERROR))
+            {
+                printf("servo_reader %d: servos found\n", __LINE__);
+            }
+            error_flags &= ~SERVO_ERROR;
+            send_error();
+
+            uint8_t buffer;
+            while(1)
+            {
+                int bytes_read = read(servo_fd, &buffer, 1);
+                if(bytes_read <= 0)
+                {
+                    printf("servo_reader %d: servos unplugged\n", __LINE__);
+                    close(servo_fd);
+                    servo_fd = -1;
+                    break;
+                }
+            }
+            //printf("%c", buffer);
+            //fflush(stdout);
+        }
+        else
+        {
+            if(!(error_flags & SERVO_ERROR))
+            {
+                printf("servo_reader %d: servos not found\n", __LINE__);
+            }
+            error_flags |= SERVO_ERROR;
+            send_error();
+            sleep(1);
+        }
     }
 }
 
 int init_servos()
 {
-#ifdef __clang__
-    servo_fd = init_serial("/dev/cu.usbserial-AL03OO1F");
-#else
-#ifdef USE_ATMEGA
-	servo_fd = init_serial("/dev/ttyUSB0");
-	if(servo_fd < 0) servo_fd = init_serial("/dev/ttyUSB1");
-	if(servo_fd < 0) servo_fd = init_serial("/dev/ttyUSB2");
-#endif
-
-#ifdef USE_PIC
-	servo_fd = init_serial("/dev/ttyACM0");
-	if(servo_fd < 0) servo_fd = init_serial("/dev/ttyACM1");
-	if(servo_fd < 0) servo_fd = init_serial("/dev/ttyACM2");
-#endif
-
-#endif
+    pthread_t x;
+	pthread_create(&x, 
+		0, 
+		servo_reader, 
+		0);
 
 
-    if(servo_fd >= 0)
-    {
-        pthread_t x;
-	    pthread_create(&x, 
-		    0, 
-		    servo_reader, 
-		    0);
-        return 0;
-    }
-    else
-    {
-        return 1;
-    }
 }
 
 void write_servos(int use_pwm_limits)
@@ -455,6 +415,33 @@ void write_servos(int use_pwm_limits)
 //printf("write_servos %d %d %d\n", __LINE__, pan_i,  tilt_i);
 		int temp = write(servo_fd, buffer, BUFFER_SIZE);
 	}
+}
+
+void stop_servos()
+{
+	if(servo_fd >= 0)
+	{
+#define SYNC_CODE0 0xff
+#define SYNC_CODE1 0x2d
+#define SYNC_CODE2 0xd4
+#define SYNC_CODE3 0xe5
+#define BUFFER_SIZE 8
+		char buffer[BUFFER_SIZE];
+        buffer[0] = SYNC_CODE0;
+        buffer[1] = SYNC_CODE1;
+        buffer[2] = SYNC_CODE2;
+        buffer[3] = SYNC_CODE3;
+        buffer[4] = 0;
+        buffer[5] = 0;
+        buffer[6] = 0;
+        buffer[7] = 0;
+
+// write it a few times to defeat UART initialization glitches
+		int temp = write(servo_fd, buffer, BUFFER_SIZE);
+        temp = write(servo_fd, buffer, BUFFER_SIZE);
+        temp = write(servo_fd, buffer, BUFFER_SIZE);
+        temp = write(servo_fd, buffer, BUFFER_SIZE);
+    }    
 }
 
 
@@ -592,377 +579,6 @@ void save_defaults()
     fclose(fd);
 }
 
-const char* lens_to_text(int lens)
-{
-    switch(lens)
-    {
-        case LENS_15:
-            return "15-17MM";
-            break;
-        case LENS_28:
-            return "28MM";
-            break;
-        case LENS_50:
-            return "50MM";
-            break;
-        default:
-            return "UNKNOWN";
-    }
-}
-
-const char* landscape_to_text(int landscape)
-{
-    if(landscape)
-    {
-        return "LANDSCAPE";
-    }
-    else
-    {
-        return "PORTRAIT";
-    }
-}
-
-class GUI : public BC_Window
-{
-public:
-    int text_y2;
-// width for the video window
-    int reserved_w = WINDOW_W * 3 / 4;
-    int need_clear_video;
-
-
-    GUI() : BC_Window("Tracker",
-        0, // x
-		0, // y
-		WINDOW_W, // w
-		WINDOW_H, // h
-		-1, // minw
-		-1, // minh
-		0, // allow_resize
-		0, // private_color
-		1, // hide
-        BLACK) // bg_color
-    {
-    };
-
-	int close_event()
-	{
-		set_done(0);
-		return 1;
-	};
-    
-    void print_values(int flash_it)
-    {
-        char string[BCTEXTLEN];
-        sprintf(string, 
-            "PAN (a,d) = %d\n"
-            "TILT (w,s) = %d\n"
-            "PAN_SIGN (p) = %d\n"
-            "TILT_SIGN (t) = %d\n"
-            "LENS (l) = %s\n"
-            "ROTATION (r) = %s", 
-            (int)(pan - (MAX_PWM + MIN_PWM) / 2),
-            (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
-            pan_sign,
-            tilt_sign,
-            lens_to_text(lens),
-            landscape_to_text(landscape));
-        int line_h = get_text_height(LARGEFONT, "0");
-        int text_h = get_text_height(LARGEFONT, string);
-        int text_w = get_text_width(LARGEFONT, "ROTATION (r) = LANDSCAPE");
-        int text_x = MARGIN;
-        int text_y = line_h + text_y2;
-        clear_box(text_x, text_y - line_h, text_w, text_h);
-        set_color(WHITE);
-        draw_text(text_x, 
-            text_y, 
-            string);
-        if(flash_it)
-        {
-            flash(text_x, text_y - line_h, text_w, text_h, 1);
-        }
-    }
-    
-    int keypress_event()
-    {
-//        printf("GUI::keypress_event %d %c\n", __LINE__, get_keypress());
-        int need_print_values = 0;
-        int need_write_servos = 0;
-        switch(get_keypress())
-        {
-            case ESC:
-            case 'q':
-// escape out of configuration
-                if(current_operation == CONFIGURING)
-                {
-                    ::save_defaults();
-                }
-                set_done(0);
-                return 1;
-                break;
-            
-            case ' ':
-            case RETURN:
-// advance operation
-                if(current_operation == STARTUP)
-                {
-                    current_operation = CONFIGURING;
-                    clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
-                    int text_h = get_text_height(LARGEFONT, "q0");
-                    int y = text_h + MARGIN;
-                    int x = MARGIN;
-                    set_color(WHITE);
-                    char string[BCTEXTLEN];
-                    sprintf(string,
-                        "Press keys to aim the mount.\n\n"
-                        "PWM Values should be as\n"
-                        "close to 0 as possible.\n"
-//                         "a - left\n"
-//                         "d - right\n"
-//                         "w - up\n"
-//                         "s - down\n"
-//                         "t - invert tilt sign\n"
-//                         "p - invert pan sign\n"
-//                         "l - change lens\n"
-//                         "r - rotate the camera\n"
-                        "SPACE or ENTER to save defaults & \n"
-                        "begin tracking\n"
-                        "ESC to give up & go to a movie.");
-                    draw_text(x, 
-                        y, 
-                        string);
-                    text_y2 = y + get_text_height(LARGEFONT, string) + text_h;
-                    
-                    print_values(0);
-                    flash(1);
-                    
-// write it a few times to defeat UART initialization glitches
-                    write_servos(1);
-                    usleep(100000);
-                    write_servos(1);
-                    usleep(100000);
-                    write_servos(1);
-                    usleep(100000);
-                    write_servos(1);
-                }
-                else
-                if(current_operation == CONFIGURING)
-                {
-                    start_pan = pan;
-                    start_tilt = tilt;
-                    ::save_defaults();
-                    current_operation = TRACKING;
-                    clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
-                    flash(1);
-                }
-                break;
-            
-            case 'w':
-                tilt += lenses[lens].tilt_step * tilt_sign;
-                need_write_servos = 1;
-                need_print_values = 1;
-                break;
-            
-            case 's':
-                tilt -= lenses[lens].tilt_step * tilt_sign;
-                need_write_servos = 1;
-                need_print_values = 1;
-                break;
-            
-            case 'a':
-                pan -= lenses[lens].pan_step * pan_sign;
-                need_write_servos = 1;
-                need_print_values = 1;
-                break;
-            
-            case 'd':
-                pan += lenses[lens].pan_step * pan_sign;
-                need_write_servos = 1;
-                need_print_values = 1;
-                break;
-            
-            case 't':
-                tilt_sign *= -1;
-                need_print_values = 1;
-                break;
-            
-            case 'p':
-                pan_sign *= -1;
-                need_print_values = 1;
-                break;
-            
-            case 'r':
-                landscape = !landscape;
-                need_print_values = 1;
-                need_clear_video = 1;
-                break;
-           
-            case 'l':
-                lens++;
-                if(lens >= TOTAL_LENSES)
-                {
-                    lens = 0;
-                }
-                need_print_values = 1;
-                break;
-        }
-        
-        if(need_print_values && current_operation == CONFIGURING)
-        {
-            print_values(1);
-        }
-        
-        if(need_write_servos)
-        {
-            write_servos(1);
-        }
-
-// trap all of them
-        return 1;
-    }
-    
-};
-
-static GUI *gui;
-
-class GUIThread : public Thread
-{
-public:
-    GUIThread() : Thread()
-    {
-    }
-
-    void run()
-    {
-        gui->run_window();
-        exit(0);
-    }
-};
-
-static GUIThread gui_thread;
-static BC_Bitmap *gui_bitmap = 0;
-
-
-void init_gui()
-{
-    gui = new GUI();
-    gui->reposition_window(-gui->get_resources()->get_left_border(),
-        -gui->get_resources()->get_top_border());
-    gui_bitmap = new BC_Bitmap(gui, 
-	    WINDOW_W,
-	    WINDOW_H,
-	    BC_BGR8888,
-	    1); // use_shm
-    gui->start_video();
-    gui->show_window();
-
-    gui_thread.start();
-}
-
-
-
-// draw a frame on the GUI
-void draw_video(unsigned char *src, 
-    int dst_x,
-    int dst_y,
-    int dst_w,
-    int dst_h,
-    int src_w,
-    int src_h,
-    int src_rowspan)
-{
-    unsigned char **dst_rows = gui_bitmap->get_row_pointers();
-    int nearest_x[dst_w];
-    int nearest_y[dst_h];
-
-
-// draw the video
-    if(landscape || 1)
-    {
-//printf("draw_video %d dst_w=%d dst_h=%d src_w=%d src_h=%d\n",
-//__LINE__, dst_w, dst_h, src_w, src_h);
-        for(int i = 0; i < dst_w; i++)
-        {
-            nearest_x[i] = i * src_w / dst_w;
-            CLAMP(nearest_x[i], 0, src_w - 1);
-        }
-        
-        for(int i = 0; i < dst_h; i++)
-        {
-            nearest_y[i] = i * src_h / dst_h;
-            CLAMP(nearest_y[i], 0, src_h - 1);
-        }
-        
-        for(int i = 0; i < dst_h; i++)
-        {
-            unsigned char *src_row = src + nearest_y[i] * src_rowspan;
-            unsigned char *dst_row = dst_rows[i];
-            for(int j = 0; j < dst_w; j++)
-            {
-                int src_x = nearest_x[j];
-                *dst_row++ = src_row[src_x * 3 + 0];
-                *dst_row++ = src_row[src_x * 3 + 1];
-                *dst_row++ = src_row[src_x * 3 + 2];
-                dst_row++;
-            }
-        }
-    }
-    else
-    {
-        for(int i = 0; i < dst_w; i++)
-        {
-            nearest_x[i] = i * src_h / dst_w;
-        }
-        for(int i = 0; i < dst_h; i++)
-        {
-            nearest_y[i] = i * src_w / dst_h;
-        }
-        for(int i = 0; i < dst_h; i++)
-        {
-            unsigned char *src_col = src + nearest_y[dst_h - i - 1] * 3;
-            unsigned char *dst_row = dst_rows[i];
-            for(int j = 0; j < dst_w; j++)
-            {
-                int src_y = nearest_y[j];
-                *dst_row++ = src_col[src_y * src_rowspan + 0];
-                *dst_row++ = src_col[src_y * src_rowspan + 1];
-                *dst_row++ = src_col[src_y * src_rowspan + 2];
-                dst_row++;
-            }
-        }
-    }
-
-    gui->lock_window();
-    if(gui->need_clear_video)
-    {
-// printf("draw_video %d x=%d y=%d w=%d h=%d\n",
-// __LINE__,
-// WINDOW_W - gui->reserved_w,
-// 0,
-// gui->reserved_w,
-// WINDOW_H);
-        gui->clear_box(WINDOW_W - gui->reserved_w,
-            0, 
-            gui->reserved_w,
-            WINDOW_H);
-        gui->flash(0);
-        gui->need_clear_video = 0;
-    }
-
-    gui->draw_bitmap(gui_bitmap, 
-	    1,
-	    dst_x, // dst coords
-	    dst_y,
-	    dst_w,
-	    dst_h,
-	    0, // src coords
-	    0,
-	    dst_w,
-	    dst_h);
-    gui->unlock_window();
-}
-
-
 
 // base class for video importers
 class InputBase : public op::WorkerProducer<std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>>
@@ -970,6 +586,7 @@ class InputBase : public op::WorkerProducer<std::shared_ptr<std::vector<std::sha
 public:
     static int initialized;
     static int frame_count;
+    static int fps_frame_count;
 #define BUFSIZE2 0x400000
 // compressed frame from the hardware
     static unsigned char reader_buffer3[BUFSIZE2];
@@ -997,13 +614,13 @@ public:
 	    pthread_mutex_init(&frame_lock, &attr);
         sem_init(&frame_ready_sema, 0, 0);
 
-printf("InputBase::initialize %d\n", __LINE__);
+//printf("InputBase::initialize %d\n", __LINE__);
 	    pthread_t reader_tid;
 	    pthread_create(&reader_tid, 
 		    0, 
 		    entrypoint, 
 		    this);
-printf("InputBase::initialize %d\n", __LINE__);
+//printf("InputBase::initialize %d\n", __LINE__);
 
         initialized = 1;
     }
@@ -1033,6 +650,7 @@ printf("InputBase::initialize %d\n", __LINE__);
             if(frame_size2 > 0)
             {
                 cv::Mat rawData(1, frame_size, CV_8UC1, (void*)reader_buffer3);
+// width & height are decoded from the JPEG data in rawData
                 cv::Mat raw_image = imdecode(rawData, cv::IMREAD_COLOR);
 // printf("InputBase::workProducer %d w=%d h=%d\n", 
 // __LINE__, 
@@ -1090,6 +708,7 @@ printf("InputBase::initialize %d\n", __LINE__);
 
 int InputBase::initialized = 0;
 int InputBase::frame_count = 0;
+int InputBase::fps_frame_count = 0;
 unsigned char InputBase::reader_buffer3[BUFSIZE2];
 int InputBase::frame_size = 0;
 pthread_mutex_t InputBase::frame_lock;
@@ -1216,6 +835,7 @@ public:
                                 sem_post(&frame_ready_sema);
 
                                 frame_count++;
+                                fps_frame_count++;
                                 struct timeval time2;
                                 gettimeofday(&time2, 0);
                                 int64_t diff = TO_MS(time2) - TO_MS(time1);
@@ -1262,13 +882,13 @@ const uint8_t GPhoto2Input::stop_code[2] = { 0xff, 0xd9 };
 
 #ifdef LOAD_HDMI
 
-#define HDMI_PATH "/dev/video1"
-//#define HDMI_W 1920
-//#define HDMI_H 1080
-#define HDMI_W (1920 * 2)
-#define HDMI_H (1080 * 2)
+// video devices
+#define HDMI0 0
+#define HDMI1 4
+#define HDMI_W 1920
+#define HDMI_H 1080
 
-#ifdef RECORD_HDMI
+#ifdef RAW_HDMI
     #define HDMI_BUFFERS 32
 #else
     #define HDMI_BUFFERS 2
@@ -1290,52 +910,100 @@ public:
     void reader_thread()
     {
         struct timeval time1;
+        struct timespec fps_time1;
         gettimeofday(&time1, 0);
 
-        printf("GPhoto2Input::reader_thread %d\n", __LINE__);
+        int current_path = HDMI0;
+        int verbose = 0;
+
+//        printf("HDMIInput::reader_thread %d\n", __LINE__);
         while(1)
         {
             if(fd < 0)
             {
-                printf("HDMIInput::reader_thread %d opening video4linux\n", __LINE__);
+//                printf("HDMIInput::reader_thread %d opening video4linux\n", __LINE__);
 
-                fd = open(HDMI_PATH, O_RDWR);
+// probe for the video device
+                char string[TEXTLEN];
+                sprintf(string, "/dev/video%d", current_path);
+                fd = open(string, O_RDWR);
+
                 if(fd < 0)
                 {
-                    printf("HDMIInput::reader_thread %d: failed to open %s\n",
-                        __LINE__,
-                        HDMI_PATH);
+                    if(!(error_flags & VIDEO_DEVICE_ERROR))
+                    {
+                        printf("HDMIInput::reader_thread %d: failed to open %s\n",
+                            __LINE__,
+                            string);
+                    }
+                    error_flags |= VIDEO_DEVICE_ERROR;
+                    send_error();
                     sleep(1);
                 }
                 else
                 {
+
+//                     printf("HDMIInput::reader_thread %d: opened %s\n",
+//                         __LINE__,
+//                         string);
+
                     struct v4l2_format v4l2_params;
                     v4l2_params.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
                     ioctl(fd, VIDIOC_G_FMT, &v4l2_params);
-//                     printf("HDMIInput::reader_thread %d: default format=%c%c%c%c w=%d h=%d\n",
-//                         __LINE__,
-//                         v4l2_params.fmt.pix.pixelformat & 0xff,
-//                         (v4l2_params.fmt.pix.pixelformat >> 8) & 0xff,
-//                         (v4l2_params.fmt.pix.pixelformat >> 16) & 0xff,
-//                         (v4l2_params.fmt.pix.pixelformat >> 24) & 0xff,
-//                         v4l2_params.fmt.pix.width,
-//                         v4l2_params.fmt.pix.height);
-                    
-                    v4l2_params.fmt.pix.width = HDMI_W;
-                    v4l2_params.fmt.pix.height = HDMI_H;
 
-#ifdef RECORD_HDMI
-                    v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
-#else
-                    v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-#endif
-                    if(ioctl(fd, VIDIOC_S_FMT, &v4l2_params) < 0)
+                    if(verbose) printf("HDMIInput::reader_thread %d: default format=%c%c%c%c w=%d h=%d\n",
+                        __LINE__,
+                        v4l2_params.fmt.pix.pixelformat & 0xff,
+                        (v4l2_params.fmt.pix.pixelformat >> 8) & 0xff,
+                        (v4l2_params.fmt.pix.pixelformat >> 16) & 0xff,
+                        (v4l2_params.fmt.pix.pixelformat >> 24) & 0xff,
+                        v4l2_params.fmt.pix.width,
+                        v4l2_params.fmt.pix.height);
+
+// reject it if it's the wrong resolution, since it's the laptop webcam
+                    if(v4l2_params.fmt.pix.width != HDMI_W ||
+                        v4l2_params.fmt.pix.height != HDMI_H)
                     {
-                        printf("HDMIInput::reader_thread %d: VIDIOC_S_FMT failed\n",
-                            __LINE__);
+                        if(!(error_flags & VIDEO_DEVICE_ERROR))
+                        {
+                            printf("HDMIInput::reader_thread %d wrong camera\n",
+                                __LINE__);
+                        }
+                        error_flags |= VIDEO_DEVICE_ERROR;
+                        send_error();
+                        close(fd);
+                        fd = -1;
+                        sleep(1);
                     }
+                    else
+                    {
+                        if((error_flags & VIDEO_DEVICE_ERROR))
+                        {
+                            printf("HDMIInput::reader_thread %d: opened %s\n",
+                                __LINE__,
+                                string);
+                            error_flags &= ~VIDEO_DEVICE_ERROR;
+                            send_error();
+                        }
 
+                        v4l2_params.fmt.pix.width = HDMI_W;
+                        v4l2_params.fmt.pix.height = HDMI_H;
 
+    #ifdef RAW_HDMI
+                        v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
+    #else
+                        v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+    #endif
+                        if(ioctl(fd, VIDIOC_S_FMT, &v4l2_params) < 0)
+                        {
+                            printf("HDMIInput::reader_thread %d: VIDIOC_S_FMT failed\n",
+                                __LINE__);
+                        }
+                    }
+                }
+
+                if(fd >= 0)
+                {
 //                     struct v4l2_jpegcompression jpeg_opts;
 //                     if(ioctl(fd, VIDIOC_G_JPEGCOMP, &jpeg_opts) < 0)
 //                     {
@@ -1351,8 +1019,6 @@ public:
 //                         printf("HDMIInput::reader_thread %d: VIDIOC_S_JPEGCOMP failed\n",
 //                             __LINE__);
 //                     }
-                    
-
 
                     struct v4l2_requestbuffers requestbuffers;
                     requestbuffers.count = HDMI_BUFFERS;
@@ -1402,6 +1068,7 @@ public:
 		                printf("HDMIInput::reader_thread %d: VIDIOC_STREAMON failed\n",
                             __LINE__);
                     }
+                    clock_gettime(CLOCK_MONOTONIC, &fps_time1);
                 }
             }
 
@@ -1416,12 +1083,17 @@ public:
                 {
                     printf("HDMIInput::reader_thread %d: VIDIOC_DQBUF failed\n",
                         __LINE__);
+                    error_flags |= VIDEO_BUFFER_ERROR;
+                    send_error();
                     close(fd);
                     fd = -1;
                     sleep(1);
                 }
                 else
                 {
+                    error_flags &= ~VIDEO_BUFFER_ERROR;
+                    error_flags &= ~VIDEO_DEVICE_ERROR;
+                    send_error();
                     unsigned char *ptr = mmap_buffer[buffer.index];
 //                     printf("HDMIInput::reader_thread %d: index=%d size=%d %02x %02x %02x %02x %02x %02x %02x %02x\n",
 //                         __LINE__,
@@ -1441,12 +1113,24 @@ public:
                         ptr[2] == 0xff && 
                         ptr[3] == 0xdb)
                     {
+// discard if it arrived too soon
+                        fps_frame_count++;
+                        struct timespec fps_time2;
+                        clock_gettime(CLOCK_MONOTONIC, &fps_time2);
+                        double delta = 
+                            (double)((fps_time2.tv_sec * 1000 + fps_time2.tv_nsec / 1000000) -
+                            (fps_time1.tv_sec * 1000 + fps_time1.tv_nsec / 1000000)) / 1000;
+                        if(delta >= 1.0 / FPS)
+                        {
 // send it to openpose
-                        pthread_mutex_lock(&frame_lock);
-                        memcpy(reader_buffer3, ptr, buffer.bytesused);
-                        frame_size = buffer.bytesused;
-                        pthread_mutex_unlock(&frame_lock);
-                        sem_post(&frame_ready_sema);
+                            pthread_mutex_lock(&frame_lock);
+                            memcpy(reader_buffer3, ptr, buffer.bytesused);
+                            frame_size = buffer.bytesused;
+                            pthread_mutex_unlock(&frame_lock);
+                            sem_post(&frame_ready_sema);
+                            fps_time1 = fps_time2;
+                        }
+
                     }
 
                     if(ioctl(fd, VIDIOC_QBUF, &buffer) < 0)
@@ -1465,9 +1149,18 @@ public:
 //                             __LINE__,
 //                             (double)frame_count * 1000 / diff);
                         frame_count = 0;
-                        gettimeofday(&time1, 0);
+                        time1 = time2;
                     }
 
+                }
+            }
+            
+            if(fd < 0)
+            {
+                current_path++;
+                if(current_path > HDMI1)
+                {
+                    current_path = HDMI0;
                 }
             }
         }
@@ -1477,6 +1170,31 @@ public:
 #endif // LOAD_HDMI
 
 
+
+static const char* signal_titles[] =
+{
+	"NULL",
+	"SIGHUP",
+	"SIGINT",
+	"SIGQUIT",
+	"SIGILL",
+	"SIGTRAP",
+	"SIGABRT",
+	"SIGBUS",
+	"SIGFPE",
+	"SIGKILL",
+	"SIGUSR1", // 10
+	"SIGSEGV",
+	"SIGUSR2",
+	"SIGPIPE",
+	"SIGALRM",
+	"SIGTERM",
+    "SIGSTKFLT",
+    "SIGCHLD",
+    "SIGCONT",
+    "SIGSTOP",
+    "SIGTSTP", // 20
+};
 
 
 
@@ -1488,7 +1206,9 @@ void quit(int sig)
 	info.c_lflag |= ICANON;
 	info.c_lflag |= ECHO;
 	tcsetattr(fileno(stdin), TCSANOW, &info);
-    
+
+    printf("quit %d sig=%s\n", __LINE__, signal_titles[sig]);
+
     if(ffmpeg_fd)
     {
         printf("quit %d\n", __LINE__);
@@ -1496,6 +1216,11 @@ void quit(int sig)
         printf("quit %d\n", __LINE__);
     }
     exit(0);
+}
+
+void ignore(int sig)
+{
+    printf("ignore %d sig=%s\n", __LINE__, signal_titles[sig]);
 }
 
 
@@ -1873,6 +1598,7 @@ public:
             
             
             // show the output frame on the GUI
+#ifndef USE_SERVER
             if(current_operation == CONFIGURING ||
                 current_operation == STARTUP)
             {
@@ -1905,6 +1631,7 @@ public:
                     image.cols,
                     image.rows,
                     image.cols * 3);
+//printf("Process::workConsumer %d\n", __LINE__);
             }
             else
             {
@@ -1923,7 +1650,6 @@ public:
                     dst_h = dst_w * image.rows / image.cols;
                 }
 
-
                 draw_video((unsigned char*)image.ptr(0), 
                     WINDOW_W / 2 - dst_w / 2,
                     0,
@@ -1932,6 +1658,7 @@ public:
                     image.cols,
                     image.rows,
                     image.cols * 3);
+//printf("Process::workConsumer %d\n", __LINE__);
 
 
 
@@ -1941,9 +1668,11 @@ public:
                 {
                     char string[TEXTLEN];
                     sprintf(string, 
-                        "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 15 -s:v %dx%d -i - -c:v mpeg4 -vb 5000k -an %s", 
+                        "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 15 -s:v %dx%d -i - -vf scale=%d:%d -c:v mpeg4 -vb 5000k -an %s", 
                         image.cols,
                         image.rows,
+                        SERVER_W,
+                        SERVER_H,
                         OUTPATH2);
                     printf("Process::workConsumer %d: %s\n",
                         __LINE__,
@@ -1969,8 +1698,118 @@ public:
 #endif // SAVE_OUTPUT2
 
 
+            }
+#else // !USE_SERVER
+
+// send output frame to server
+//printf("Process::workConsumer %d\n", __LINE__);
+            pthread_mutex_lock(&www_mutex);
+//printf("Process::workConsumer %d server_output=%p\n", __LINE__, server_output);
+
+            if(server_output)
+            {
+// portrait mode
+                if(image.rows > image.cols)
+                {
+// must unrotate & uncrop portrait mode so it's always landscape
+// for the encoder.  Then the phone rotates & crops again.
+// printf("Process::workConsumer %d %dx%d\n", 
+// __LINE__, 
+// image.cols, 
+// image.rows);
+                    int x_lookup[SERVER_W];
+// cropping image is stretched to fill the full SERVER_W
+                    for(int i = 0; i < SERVER_W; i++)
+                    {
+                        x_lookup[i] = i * image.rows / SERVER_W;
+                        if(x_lookup[i] >= image.rows)
+                        {
+                            x_lookup[i] = image.rows - 1;
+                        }
+                    }
+// printf("Process::workConsumer %d %dx%d\n", 
+// __LINE__, 
+// image.cols, 
+// image.rows);
+
+                    for(int i = 0; i < SERVER_H; i++)
+                    {
+                        int y_lookup = i * image.cols / SERVER_H;
+                        if(y_lookup >= image.cols)
+                        {
+                            y_lookup = image.cols - 1;
+                        }
+// printf("Process::workConsumer %d i=%d y_lookup=%d\n", 
+// __LINE__, 
+// i,
+// y_lookup);
+
+                        uint8_t *dst = server_video + i * SERVER_W * 3;
+                        for(int j = 0; j < SERVER_W; j++)
+                        {
+// printf("Process::workConsumer %d j=%d x_lookup=%d\n", 
+// __LINE__, 
+// j,
+// x_lookup[j]);
+                            uint8_t *src = (uint8_t*)image.ptr(0) +
+                                x_lookup[j] * image.cols * 3 + 
+                                y_lookup * 3;
+                            *dst++ = src[0];
+                            *dst++ = src[1];
+                            *dst++ = src[2];
+                        }
+                    }
+// printf("Process::workConsumer %d %dx%d\n", 
+// __LINE__, 
+// image.cols, 
+// image.rows);
+
+                    fwrite(server_video,
+                        1,
+                        SERVER_W * SERVER_H * 3,
+                        server_output);
+                }
+                else
+                {
+// scale down to server size
+                    int x_lookup[SERVER_W];
+                    for(int i = 0; i < SERVER_W; i++)
+                    {
+                        x_lookup[i] = i * image.cols / SERVER_W;
+                        if(x_lookup[i] >= image.cols)
+                        {
+                            x_lookup[i] >= image.cols - 1;
+                        }
+                    }
+                    for(int i = 0; i < SERVER_H; i++)
+                    {
+                        int y_lookup = i * image.rows / SERVER_H;
+                        if(y_lookup >= image.rows)
+                        {
+                            y_lookup = image.rows - 1;
+                        }
+                        uint8_t *src = (uint8_t*)image.ptr(0) +
+                            y_lookup * image.cols * 3;
+                        uint8_t *dst = server_video + i * SERVER_W * 3;
+                        for(int j = 0; j < SERVER_W; j++)
+                        {
+                            uint8_t *src2 = src + x_lookup[j] * 3;
+                            *dst++ = src2[0];
+                            *dst++ = src2[1];
+                            *dst++ = src2[2];
+                        }
+                    }
+
+                    fwrite(server_video,
+                        1,
+                        SERVER_W * SERVER_H * 3,
+                        server_output);
+                }
 
             }
+            pthread_mutex_unlock(&www_mutex);
+
+#endif // USE_SERVER
         }
         
         
@@ -1987,37 +1826,51 @@ public:
 
 int main(int argc, char *argv[])
 {
-// set up the camera mount
+// reset the console for most signals
+// ignore signals from the child process
     signal(SIGHUP, quit);
-    signal(SIGINT, quit);
+//    signal(SIGINT, quit);
     signal(SIGQUIT, quit);
+    signal(SIGTRAP, quit);
+    signal(SIGABRT, quit);
+    signal(SIGBUS, quit);
+    signal(SIGKILL, quit);
+    signal(SIGUSR1, quit);
+    signal(SIGSEGV, quit);
+    signal(SIGUSR2, quit);
+    signal(SIGPIPE, ignore);
+    signal(SIGALRM, quit);
     signal(SIGTERM, quit);
+    signal(SIGCHLD, ignore);
 
     load_defaults();
 
+
+#ifdef USE_SERVER
+    init_server();
+
+#else
     init_gui();
+#endif
+
     int result = init_servos();
-//     if(result)
-//     {
-// // don't use the camera mount
-//         current_operation = TRACKING;
-//     }
-//     else
-    {
-        gui->lock_window();
-        gui->set_font(LARGEFONT);
-        gui->set_color(WHITE);
-        int text_h = gui->get_text_height(LARGEFONT, "q0");
-        int y = text_h + MARGIN;
-        int x = MARGIN;
-        gui->draw_text(x, 
-            y, 
-            "Welcome to the tracker\n\n"
-            "Press SPACE or ENTER to activate the mount\n\n"
-            "ESC to give up & go to a movie.");
-        gui->flash(1);
-        gui->unlock_window();
-    }
+
+
+#ifndef USE_SERVER
+    gui->lock_window();
+    gui->set_font(LARGEFONT);
+    gui->set_color(WHITE);
+    int text_h = gui->get_text_height(LARGEFONT, "q0");
+    int y = text_h + MARGIN;
+    int x = MARGIN;
+    gui->draw_text(x, 
+        y, 
+        "Welcome to the tracker\n\n"
+        "Press SPACE or ENTER to activate the mount\n\n"
+        "ESC to give up & go to a movie.");
+    gui->flash(1);
+    gui->unlock_window();
+#endif // USE_SERVER
 
 
 // custom input
