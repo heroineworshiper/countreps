@@ -26,6 +26,16 @@ servos runs on an atmega & must be programmed with instructions in servos.c
 
 
 
+tracker.c
+tracker.h
+trackerx11.c
+trackerserver.c:
+    The back end for the tracking.
+    USE_SERVER in tracker.h switches the tracker from a standalone GUI to a phone GUI
+
+tracker.sh: Runs the tracker
+
+
 
 
 Tracker: the android interface for the tracker
@@ -42,15 +52,6 @@ ffmpeg-kit: ffmpeg for android must be built for the tracker
         org.gradle.java.home=/usr/local/jdk1.8.0_144
     Replace everything between VALIDATE GPL FLAGS & DO NOT BUILD ANDROID ARCHIVE
         with 'cd android' to skip rebuilding every time.
-
-
-tracker.c
-tracker.h
-trackerx11.c
-trackerserver.c:
-    The back end for the tracking.
-
-tracker.sh: Runs the tracker
 
 
 Linux notes:
