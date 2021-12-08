@@ -7,22 +7,25 @@ Compiling countreps is a matter of
 
 make countreps
 
+
+countreps.c: The rep counter.
+countreps.sh: Runs the rep counter.
+
+
 Compiling tracker is a matter of
 
 make tracker
 make servos
+
+servos.pcb: USB to PWM circuit board
+
+servos.X: USB to PWM firmware
 
 Building servos.X requires mplab.
 servos runs on an atmega & must be programmed with instructions in servos.c
 
 
 
-TODO:
-Don't save new home position after tracking
-portrait mounting plate
-Bolt with knob & tool for portrait mode.
-Lens mount
-PWM text is centered instead of left justified
 
 
 Tracker: the android interface for the tracker
@@ -41,8 +44,13 @@ ffmpeg-kit: ffmpeg for android must be built for the tracker
         with 'cd android' to skip rebuilding every time.
 
 
+tracker.c
+tracker.h
+trackerx11.c
+trackerserver.c:
+    The back end for the tracking.
 
-
+tracker.sh: Runs the tracker
 
 
 Linux notes:
