@@ -1,0 +1,409 @@
+/*
+ * Server for the tracking camera
+ * Copyright (C) 2019-2021 Adam Williams <broadcast at earthling dot net>
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * 
+ */
+
+#include <arpa/inet.h>
+#include <ctype.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+#include <semaphore.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <pthread.h>
+#include "tracker.h"
+
+
+
+#ifdef USE_SERVER
+
+#define PORT0 1234
+#define PORT1 1238
+#define TOTAL_CONNECTIONS 32
+#define SOCKET_BUFSIZE 1024
+#define SERVER_NAME "Tracker"
+#define FIFO_PATH "/tmp/mpeg_fifo.mp4"
+
+
+
+FILE *server_output = 0;
+
+typedef struct 
+{
+	int is_busy;
+	int fd;
+	sem_t lock;
+} webserver_connection_t;
+webserver_connection_t* connections[TOTAL_CONNECTIONS];
+
+pthread_mutex_t www_mutex;
+
+
+
+
+void send_header(webserver_connection_t *connection, const char *content_type)
+{
+	char header[TEXTLEN];
+	sprintf(header, "HTTP/1.0 200 OK\r\n"
+            "Content-Type: %s\r\n"
+            "Server: %s\r\n\r\n",
+			content_type,
+            SERVER_NAME);
+	int _ = write(connection->fd, header, strlen(header));
+}
+
+void send_error(webserver_connection_t *connection, const char *text)
+{
+	char header[TEXTLEN];
+	sprintf(header, "HTTP/1.0 404 OK\r\n"
+            "Content-Type: text/html\r\n"
+            "Server: %s\r\n\r\n",
+            SERVER_NAME);
+	int _ = write(connection->fd, header, strlen(header));
+    _ = write(connection->fd, text, strlen(text));
+}
+
+void send_string(webserver_connection_t *connection, const char *text)
+{
+	int _ = write(connection->fd, text, strlen(text));
+}
+
+void send_file(webserver_connection_t *connection, 
+    const char *getpath, 
+    const char *mime)
+{
+	char string[TEXTLEN];
+    char string2[TEXTLEN];
+
+    sprintf(string2, "Couldn't open %s\n", string);
+    send_error(connection, string2);
+}
+
+void send_vijeo(webserver_connection_t *connection)
+{
+    char string[TEXTLEN];
+    sprintf(string, 
+        "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 15 -s:v %dx%d -i - -f hevc -vb 5000k -an - > %s", 
+        WINDOW_W,
+        WINDOW_H,
+        FIFO_PATH);
+    printf("send_vijeo %d: running %s\n",
+        __LINE__,
+        string);
+    pthread_mutex_lock(&www_mutex);
+    server_output = popen(string, "w");
+
+
+    if(!server_output)
+    {
+        printf("send_vijeo %d: failed to run ffmpeg\n",
+            __LINE__);
+        send_error(connection, "failed to run ffmpeg");
+        pthread_mutex_unlock(&www_mutex);
+        return;
+    }
+
+    FILE *ffmpeg_read = fopen(FIFO_PATH, "r");
+    if(!ffmpeg_read)
+    {
+        printf("send_vijeo %d: failed to read ffmpeg output\n",
+            __LINE__);
+        send_error(connection, "failed to read ffmpeg output");
+        pclose(server_output);
+        server_output = 0;
+        pthread_mutex_unlock(&www_mutex);
+        return;
+    }
+
+    pthread_mutex_unlock(&www_mutex);
+
+
+    send_header(connection, "application/binary");
+    unsigned char buffer[SOCKET_BUFSIZE];
+    while(1)
+    {
+        int bytes_read = fread(buffer, 1, SOCKET_BUFSIZE, ffmpeg_read);
+        int bytes_written = write(connection->fd, buffer, bytes_read);
+
+// printf("send_vijeo %d: bytes_read=%d bytes_written=%d\n",
+// __LINE__,
+// bytes_read,
+// bytes_written);
+        if(bytes_read <= 0)
+        {
+            printf("send_vijeo %d: ffmpeg crashed\n",
+                __LINE__);
+            pthread_mutex_lock(&www_mutex);
+            pclose(server_output);
+            fclose(ffmpeg_read);
+            server_output = 0;
+            pthread_mutex_unlock(&www_mutex);
+            break;
+        }
+        
+        if(bytes_written < bytes_read)
+        {
+            printf("send_vijeo %d: connection closed\n",
+                __LINE__);
+            pthread_mutex_lock(&www_mutex);
+            pclose(server_output);
+            fclose(ffmpeg_read);
+            server_output = 0;
+            pthread_mutex_unlock(&www_mutex);
+            break;
+        }
+    }
+}
+
+
+void* web_server_connection(void *ptr)
+{
+	webserver_connection_t *connection = (webserver_connection_t*)ptr;
+	unsigned char buffer[SOCKET_BUFSIZE];
+	int i;
+	
+	while(1)
+	{
+		sem_wait(&connection->lock);
+		
+		int done = 0;
+		while(!done)
+		{
+			buffer[0] = 0;
+			int bytes_read = read(connection->fd, buffer, SOCKET_BUFSIZE);
+			if(bytes_read <= 0)
+			{
+				break;
+			}
+			
+printf("web_server_connection %d:\n", __LINE__);
+printf("%s", buffer);
+
+			uint8_t *ptr = buffer;
+			char getpath[TEXTLEN];
+			if(ptr[0] == 'G' &&
+				ptr[1] == 'E' &&
+				ptr[2] == 'T' &&
+				ptr[3] == ' ')
+			{
+				ptr += 4;
+				while(*ptr != 0 && *ptr == ' ')
+				{
+					ptr++;
+				}
+				
+				if(*ptr != 0)
+				{
+					char *ptr2 = getpath;
+					while(*ptr != 0 && *ptr != ' ')
+					{
+						*ptr2++ = *ptr++;
+					}
+					*ptr2 = 0;
+				}
+				
+//printf("web_server_connection %d: requested %s\n", __LINE__, getpath);
+
+// parse commands
+                if(!strcasecmp(getpath, "/vijeo"))
+                {
+                    send_vijeo(connection);
+                }
+                else
+				if(!strcasecmp(getpath, "/favicon.ico"))
+				{
+					send_file(connection, getpath, "image/x-icon");
+					done = 1;
+				}
+				else
+				if(!strcasecmp(getpath, "/") ||
+					!strcasecmp(getpath, "/index.html"))
+				{
+					send_file(connection, getpath, "text/html");
+					done = 1;
+				}
+				else
+				if(!strcasecmp(getpath, "/record.png") ||
+					!strcasecmp(getpath, "/stop.png") ||
+					!strcasecmp(getpath, "/single.gif"))
+				{
+					send_file(connection, getpath, "image/png");
+					done = 1;
+				}
+				else
+				{
+                    char string[TEXTLEN];
+					send_header(connection, "text/html");
+                    sprintf(string, "Couldn't open %s\n", getpath);
+					send_string(connection, string);
+					done = 1;
+				}
+			}
+		}
+		
+		if(!done)
+		{
+//			printf("web_server_connection %d: client closed\n", __LINE__);
+		}
+		else
+		{
+//			printf("web_server_connection %d: server closed\n", __LINE__);
+		}
+		close(connection->fd);
+		connection->is_busy = 0;
+	}
+}
+
+webserver_connection_t* new_connection()
+{
+	webserver_connection_t *result = (webserver_connection_t*)calloc(1, sizeof(webserver_connection_t));
+	sem_init(&result->lock, 0, 0);
+	pthread_attr_t  attr;
+	pthread_attr_init(&attr);
+	pthread_t tid;
+	pthread_create(&tid, 
+		&attr, 
+		web_server_connection, 
+		result);
+	return result;
+}
+
+void start_connection(webserver_connection_t *connection, int fd)
+{
+	connection->is_busy = 1;
+	connection->fd = fd;
+	sem_post(&connection->lock);
+}
+
+
+void* web_server(void *ptr)
+{
+	int i;
+	for(i = 0; i < TOTAL_CONNECTIONS; i++)
+	{
+		connections[i] = new_connection();
+	}
+	
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	
+	int reuseon = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseon, sizeof(reuseon));
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    
+    for(int port = PORT0; port < PORT1; port++)
+    {
+        addr.sin_port = htons(port);
+
+        int result = bind(fd, (struct sockaddr *) &addr, sizeof(addr));
+	    if(result)
+	    {
+		    printf("web_server %d: bind %d failed\n", __LINE__, port);
+		    continue;
+	    }
+        
+        printf("web_server %d: bound port %d\n", __LINE__, port);
+        break;
+    }
+	
+	while(1)
+	{
+		listen(fd, 256);
+		struct sockaddr_in clientname;
+		socklen_t size = sizeof(clientname);
+		int connection_fd = accept(fd,
+                			(struct sockaddr*)&clientname, 
+							&size);
+
+//printf("web_server %d: accept\n", __LINE__);
+
+		int got_it = 0;
+		for(i = 0; i < TOTAL_CONNECTIONS; i++)
+		{
+			if(!connections[i]->is_busy)
+			{
+				start_connection(connections[i], connection_fd);
+				got_it = 1;
+				break;
+			}
+		}
+		
+		if(!got_it)
+		{
+			printf("web_server %d: out of connections\n", __LINE__);
+		}
+	}
+}
+
+
+
+void init_server()
+{
+    printf("init_server %d making %s\n", __LINE__, FIFO_PATH);
+    int result = mkfifo(FIFO_PATH, 0777);
+    if(result != 0)
+    {
+        printf("init_server %d %s\n", __LINE__, strerror(errno));
+    }
+
+
+	pthread_mutexattr_t attr2;
+	pthread_mutexattr_init(&attr2);
+	pthread_mutex_init(&www_mutex, &attr2);
+    
+    pthread_t tid;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+   	pthread_create(&tid, 
+		&attr, 
+		web_server, 
+		0);
+ 
+}
+
+
+
+
+
+#endif // USE_SERVER
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

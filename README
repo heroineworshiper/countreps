@@ -12,8 +12,33 @@ Compiling tracker is a matter of
 make tracker
 make servos
 
+Building servos.X requires mplab.
 servos runs on an atmega & must be programmed with instructions in servos.c
 
+
+
+TODO:
+Don't save new home position after tracking
+portrait mounting plate
+Bolt with knob & tool for portrait mode.
+Lens mount
+PWM text is centered instead of left justified
+
+
+Tracker: the android interface for the tracker
+
+ffmpeg-kit: ffmpeg for android must be built for the tracker
+    Install the android ndk from https://developer.android.com/ndk/downloads
+    Set some environment variables
+    export ANDROID_SDK_ROOT=~/Android/Sdk
+    export ANDROID_NDK_ROOT=~/android-ndk-r23b/
+    time ./android.sh
+    Hack the Cmake version to get it to compile with whatever version you have.
+    Run ~/Android/Sdk/tools/bin/sdkmanager --licenses to update all the licenses
+    android/gradle.properties needs a full JDK to find tools.jar
+        org.gradle.java.home=/usr/local/jdk1.8.0_144
+    Replace everything between VALIDATE GPL FLAGS & DO NOT BUILD ANDROID ARCHIVE
+        with 'cd android' to skip rebuilding every time.
 
 
 

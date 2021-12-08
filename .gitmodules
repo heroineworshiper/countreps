@@ -1,0 +1,3 @@
+[submodule "ffmpeg-kit"]
+	path = ffmpeg-kit
+	url = https://github.com/tanersener/ffmpeg-kit.git
