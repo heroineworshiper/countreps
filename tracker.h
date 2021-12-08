@@ -96,7 +96,7 @@ extern int current_operation;
 #define SERVO_ERROR 4
 extern uint8_t error_flags;
 extern pthread_mutex_t www_mutex;
-extern FILE *server_output;
+extern int server_output;
 // temporary in the encoded size
 extern uint8_t *server_video;
 

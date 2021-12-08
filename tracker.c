@@ -109,7 +109,7 @@ lens_t lenses[] =
 #endif
 
 #ifdef USE_PIC
-    { 75,  75, 18,   18, 38, 38, 35, 4, 5 }, // 15mm
+    { 150,  150, 18,   18, 38, 38, 35, 4, 5 }, // 15mm
     { 75,  75,  9,    9, 38, 38, 25, 4, 5 }, // 28mm
     { 38,  38,  5,    5, 38, 38, 17, 4, 5 }, // 50mm
 #endif
@@ -522,12 +522,12 @@ void load_defaults()
         printf("load_defaults %d key='%s' value='%s'\n", __LINE__, key, value);
         if(!strcasecmp(key, "PAN"))
         {
-            pan = atof(value);
+            start_pan = pan = atof(value);
         }
         else
         if(!strcasecmp(key, "TILT"))
         {
-            tilt = atof(value);
+            start_tilt = tilt = atof(value);
         }
         else
         if(!strcasecmp(key, "PAN_SIGN"))
@@ -569,8 +569,8 @@ void save_defaults()
         return;
     }
 
-    fprintf(fd, "PAN %d\n", (int)pan);
-    fprintf(fd, "TILT %d\n", (int)tilt);
+    fprintf(fd, "PAN %d\n", (int)start_pan);
+    fprintf(fd, "TILT %d\n", (int)start_tilt);
     fprintf(fd, "PAN_SIGN %d\n", pan_sign);
     fprintf(fd, "TILT_SIGN %d\n", tilt_sign);
     fprintf(fd, "LENS %d\n", lens);
@@ -1704,13 +1704,13 @@ public:
 // send output frame to server
 //printf("Process::workConsumer %d\n", __LINE__);
             pthread_mutex_lock(&www_mutex);
-//printf("Process::workConsumer %d server_output=%p\n", __LINE__, server_output);
+//printf("Process::workConsumer %d server_output=%d\n", __LINE__, server_output);
 
-            if(server_output)
+            if(server_output >= 0)
             {
-// portrait mode
                 if(image.rows > image.cols)
                 {
+// portrait mode
 // must unrotate & uncrop portrait mode so it's always landscape
 // for the encoder.  Then the phone rotates & crops again.
 // printf("Process::workConsumer %d %dx%d\n", 
@@ -1764,10 +1764,11 @@ public:
 // image.cols, 
 // image.rows);
 
-                    fwrite(server_video,
-                        1,
-                        SERVER_W * SERVER_H * 3,
-                        server_output);
+// don't deadlock
+                    pthread_mutex_unlock(&www_mutex);
+                    int _ = write(server_output, 
+                        server_video,
+                        SERVER_W * SERVER_H * 3);
                 }
                 else
                 {
@@ -1800,14 +1801,18 @@ public:
                         }
                     }
 
-                    fwrite(server_video,
-                        1,
-                        SERVER_W * SERVER_H * 3,
-                        server_output);
+// don't deadlock
+                    pthread_mutex_unlock(&www_mutex);
+                    int _ = write(server_output, 
+                        server_video,
+                        SERVER_W * SERVER_H * 3);
                 }
 
             }
-            pthread_mutex_unlock(&www_mutex);
+            else
+            {
+                pthread_mutex_unlock(&www_mutex);
+            }
 
 #endif // USE_SERVER
         }

@@ -82,6 +82,8 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
 
     int pan;
     int tilt;
+    int start_pan;
+    int start_tilt;
     int pan_sign;
     int tilt_sign;
     int lens;
@@ -322,11 +324,11 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                 }
                 if(panText != null)
                 {
-                    needRedraw |= panText.updateText("PAN: " + String.valueOf(pan));
+                    needRedraw |= panText.updateText(getPanText());
                 }
                 if(tiltText != null)
                 {
-                    needRedraw |= tiltText.updateText("TILT: " + String.valueOf(tilt));
+                    needRedraw |= tiltText.updateText(getTiltText());
                 }
                 if(lensButton != null)
                 {
@@ -593,7 +595,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                     }
 
 
-                    panText = new Text(x, y, "PAN: " + String.valueOf(pan));
+                    panText = new Text(x, y, getPanText());
                     texts.add(panText);
 
                     if (landscape) {
@@ -602,7 +604,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                         x = canvas.getWidth() / 2;
                     }
 
-                    tiltText = new Text(x, y, "TILT: " + String.valueOf(tilt));
+                    tiltText = new Text(x, y, getTiltText());
                     texts.add(tiltText);
 
                     text = lensText();
@@ -624,6 +626,25 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                     };
                     buttons.add(lensButton);
 
+                    text = "CENTER";
+                    size = Button.calculateSize(text, null);
+                    if (landscape) {
+                        x += lensButton.getW() + MARGIN;
+                    } else {
+                        y -= lensButton.getH() + MARGIN;
+                    }
+                    Button b = new Button(x, y, text);
+                    b.listener = new Button.ButtonListener() {
+                        @Override
+                        public void onClick() {
+                            Log.i("FirstFragment", "CENTER");
+                            client.sendCommand('c');
+                        }
+                    };
+                    buttons.add(b);
+
+
+
                     // arrow dimensions
                     int w = canvas.getWidth() / 8;
                     int h = w;
@@ -636,10 +657,10 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                     else
                     {
                         centerX = canvas.getWidth()  - w - ARROW_MARGIN - w / 2 - MARGIN;
-                        centerY = y - h * 2 / 3 - MARGIN;
+                        centerY = canvas.getHeight() / 2 + MARGIN + h + ARROW_MARGIN + h / 2;
                     }
 
-                    Button b = new Button(Button.calculateRect(centerX,
+                    b = new Button(Button.calculateRect(centerX,
                             centerY - h - ARROW_MARGIN,
                             w,
                             h), Button.LEFT);
@@ -782,6 +803,18 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
             currentOperation = OFF;
         }
 
+    }
+
+    String getPanText()
+    {
+        String center = (start_pan == pan) ? "*" : "";
+        return "PAN: " + String.valueOf(pan) + center;
+    }
+
+    String getTiltText()
+    {
+        String center = (start_tilt == tilt) ? "*" : "";
+        return "TILT: " + String.valueOf(tilt) + center;
     }
 
     public void changeOperation() {

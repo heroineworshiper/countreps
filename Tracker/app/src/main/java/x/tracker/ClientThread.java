@@ -242,11 +242,13 @@ class ClientThread implements Runnable {
                                             fragment.currentOperation = packet[0];
                                             fragment.pan = read_int32(packet, 2);
                                             fragment.tilt = read_int32(packet, 6);
-                                            fragment.pan_sign = packet[10];
-                                            fragment.tilt_sign = packet[11];
-                                            fragment.lens = packet[12];
-                                            fragment.landscape = (packet[13] == 1 ? true : false);
-                                            fragment.errors = packet[14] & 0xff;
+                                            fragment.start_pan = read_int32(packet, 10);
+                                            fragment.start_tilt = read_int32(packet, 14);
+                                            fragment.pan_sign = packet[18];
+                                            fragment.tilt_sign = packet[19];
+                                            fragment.lens = packet[20];
+                                            fragment.landscape = (packet[21] == 1 ? true : false);
+                                            fragment.errors = packet[22] & 0xff;
 
                                             Log.i("ClientThread", "GET_DATA" +
                                                     " currentOperation=" + fragment.currentOperation +

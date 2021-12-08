@@ -59,7 +59,7 @@
 
 
 uint8_t *server_video = 0;
-FILE *server_output = 0;
+int server_output = -1;
 uint8_t prev_error_flags = 0xff;
 
 typedef struct 
@@ -78,44 +78,6 @@ pthread_mutex_t www_mutex;
 
 
 
-
-void send_header(webserver_connection_t *connection, const char *content_type)
-{
-	char header[TEXTLEN];
-	sprintf(header, "HTTP/1.0 200 OK\r\n"
-            "Content-Type: %s\r\n"
-            "Server: %s\r\n\r\n",
-			content_type,
-            SERVER_NAME);
-	int _ = write(connection->fd, header, strlen(header));
-}
-
-void send_error(webserver_connection_t *connection, const char *text)
-{
-	char header[TEXTLEN];
-	sprintf(header, "HTTP/1.0 404 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "Server: %s\r\n\r\n",
-            SERVER_NAME);
-	int _ = write(connection->fd, header, strlen(header));
-    _ = write(connection->fd, text, strlen(text));
-}
-
-void send_string(webserver_connection_t *connection, const char *text)
-{
-	int _ = write(connection->fd, text, strlen(text));
-}
-
-void send_file(webserver_connection_t *connection, 
-    const char *getpath, 
-    const char *mime)
-{
-	char string[TEXTLEN];
-    char string2[TEXTLEN];
-
-    sprintf(string2, "Couldn't open %s\n", string);
-    send_error(connection, string2);
-}
 
 int send_packet(webserver_connection_t *connection, int type, uint8_t *data, int bytes)
 {
@@ -142,7 +104,7 @@ int send_packet(webserver_connection_t *connection, int type, uint8_t *data, int
 
 void send_status(webserver_connection_t *connection)
 {
-    uint8_t buffer[16];
+    uint8_t buffer[32];
     buffer[0] = current_operation;
     buffer[1] = 0;
 
@@ -158,16 +120,28 @@ void send_status(webserver_connection_t *connection)
     buffer[8] = (tmp >> 16) & 0xff;
     buffer[9] = (tmp >> 24) & 0xff;
 
-    buffer[10] = pan_sign;
-    buffer[11] = tilt_sign;
-    buffer[12] = lens;
-    buffer[13] = landscape;
-    buffer[14] = error_flags;
+    tmp = (int)start_pan;
+    buffer[10] = tmp & 0xff;
+    buffer[11] = (tmp >> 8) & 0xff;
+    buffer[12] = (tmp >> 16) & 0xff;
+    buffer[13] = (tmp >> 24) & 0xff;
+
+    tmp = (int)start_tilt;
+    buffer[14] = tmp & 0xff;
+    buffer[15] = (tmp >> 8) & 0xff;
+    buffer[16] = (tmp >> 16) & 0xff;
+    buffer[17] = (tmp >> 24) & 0xff;
+
+    buffer[18] = pan_sign;
+    buffer[19] = tilt_sign;
+    buffer[20] = lens;
+    buffer[21] = landscape;
+    buffer[22] = error_flags;
 
     prev_error_flags = error_flags;
 
-    printf("send_status %d error_flags=%d\n", __LINE__, error_flags);
-    send_packet(connection, STATUS, buffer, 15);
+//    printf("send_status %d error_flags=%d\n", __LINE__, error_flags);
+    send_packet(connection, STATUS, buffer, 23);
 }
 
 void send_error()
@@ -221,15 +195,15 @@ void send_vijeo(webserver_connection_t *connection)
         exit(0);
     }
 
-//    server_output = popen(string, "w");
-    server_output = fopen(FFMPEG_STDIN, "w");
+// must be frame aligned so must be reopened for every stream
+    FILE *server_output_fd = fopen(FFMPEG_STDIN, "w");
 
 
-    if(!server_output)
+    if(!server_output_fd)
     {
-        printf("send_vijeo %d: failed to run ffmpeg\n",
-            __LINE__);
-        send_error(connection, "failed to run ffmpeg");
+        printf("send_vijeo %d: failed to open %s\n",
+            __LINE__,
+            FFMPEG_STDIN);
         pthread_mutex_unlock(&www_mutex);
         return;
     }
@@ -239,12 +213,12 @@ void send_vijeo(webserver_connection_t *connection)
     {
         printf("send_vijeo %d: failed to read ffmpeg output\n",
             __LINE__);
-        send_error(connection, "failed to read ffmpeg output");
-        pclose(server_output);
-        server_output = 0;
+        fclose(server_output_fd);
+        server_output = -1;
         pthread_mutex_unlock(&www_mutex);
         return;
     }
+    server_output = fileno(server_output_fd);
 
     pthread_mutex_unlock(&www_mutex);
 
@@ -270,6 +244,7 @@ void send_vijeo(webserver_connection_t *connection)
 // reader exited
         if(!connection->is_reading)
         {
+            printf("send_vijeo %d\n", __LINE__);
             break;
         }
 
@@ -311,9 +286,9 @@ void send_vijeo(webserver_connection_t *connection)
     kill(ffmpeg_pid, SIGKILL);
     int status;
     waitpid(ffmpeg_pid, &status, 0);
-    fclose(server_output);
+    fclose(server_output_fd);
     fclose(ffmpeg_read);
-    server_output = 0;
+    server_output = -1;
     pthread_mutex_unlock(&www_mutex);
 }
 
@@ -378,29 +353,41 @@ void* web_server_reader(void *ptr)
                             break;
 
                         case '\n':
-                            start_pan = pan;
-                            start_tilt = tilt;
                             ::save_defaults();
                             current_operation = TRACKING;
                             break;
                         
                         case 'w':
                             tilt += lenses[lens].tilt_step * tilt_sign;
+                            start_pan = pan;
+                            start_tilt = tilt;
                             need_write_servos = 1;
                             break;
 
                         case 's':
                             tilt -= lenses[lens].tilt_step * tilt_sign;
+                            start_pan = pan;
+                            start_tilt = tilt;
                             need_write_servos = 1;
                             break;
 
                         case 'a':
                             pan -= lenses[lens].pan_step * pan_sign;
+                            start_pan = pan;
+                            start_tilt = tilt;
                             need_write_servos = 1;
                             break;
 
                         case 'd':
                             pan += lenses[lens].pan_step * pan_sign;
+                            start_pan = pan;
+                            start_tilt = tilt;
+                            need_write_servos = 1;
+                            break;
+
+                        case 'c':
+                            pan = start_pan;
+                            tilt = start_tilt;
                             need_write_servos = 1;
                             break;
 
@@ -458,10 +445,10 @@ void* web_server_reader(void *ptr)
                     {
                         case 'Q':
                             stop_servos();
-                            ::save_defaults();
                             current_operation = STARTUP;
                             send_status(connection);
                             break;
+
                         case 'b':
                             current_operation = CONFIGURING;
                             send_status(connection);
