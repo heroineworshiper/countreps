@@ -1,7 +1,14 @@
 What you'll find here:
 
-countreps: rep counter using machine vision
-tracker: camera tracker using machine vision
+countreps: rep counter using openpose
+tracker: camera tracker using openpose
+
+comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack
+
+
+
+
+
 
 Compiling countreps is a matter of
 
