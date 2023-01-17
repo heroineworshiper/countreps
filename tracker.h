@@ -30,7 +30,8 @@
 //#define USE_ATMEGA // atmega at 16Mhz
 #define USE_PIC // 18f14k50 at 48Mhz
 
-#define USE_SERVER
+// Phone GUI
+//#define USE_SERVER
 
 #define WINDOW_W 1920
 #define WINDOW_H 1080

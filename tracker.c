@@ -1,6 +1,6 @@
 /*
- * tracking camera
- * Copyright (C) 2019-2021 Adam Williams <broadcast at earthling dot net>
+ * pan/tilt tracking camera using openpose
+ * Copyright (C) 2019-2023 Adam Williams <broadcast at earthling dot net>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -57,6 +57,7 @@
 #include <signal.h>
 #include <linux/videodev2.h>
 
+#include "irlib.h"
 #include "tracker.h"
 
 // load frames from test_input
@@ -349,6 +350,11 @@ void* servo_reader(void *ptr)
                     servo_fd = -1;
                     break;
                 }
+// process in IR library
+                process_code(buffer);
+                
+                
+                
             }
             //printf("%c", buffer);
             //fflush(stdout);
@@ -641,6 +647,8 @@ public:
         auto& datumPtr = datumsPtr->at(0);
         datumPtr = std::make_shared<op::Datum>();
         int frame_size2;
+        cv::Mat rawData;
+        cv::Mat raw_image;
 
         while(1)
         {
@@ -649,9 +657,20 @@ public:
             frame_size2 = frame_size;
             if(frame_size2 > 0)
             {
-                cv::Mat rawData(1, frame_size, CV_8UC1, (void*)reader_buffer3);
+                rawData.reserveBuffer(frame_size);
+                memcpy(rawData.ptr(), reader_buffer3, frame_size);
+//                cv::Mat rawData(1, frame_size, CV_8UC1, (void*)reader_buffer3);
+// invalidate the image for the next workProducer call
+                frame_size = 0;
+            }
+            pthread_mutex_unlock(&frame_lock);
+
+
+
+            if(frame_size2 > 0)
+            {
 // width & height are decoded from the JPEG data in rawData
-                cv::Mat raw_image = imdecode(rawData, cv::IMREAD_COLOR);
+                raw_image = imdecode(rawData, cv::IMREAD_COLOR);
 // printf("InputBase::workProducer %d w=%d h=%d\n", 
 // __LINE__, 
 // raw_image.cols, 
@@ -684,10 +703,8 @@ public:
 // try again
                     frame_size2 = 0;
                 }
-// invalidate the image for the next workProducer call
-                frame_size = 0;
             }
-            pthread_mutex_unlock(&frame_lock);
+
             if(frame_size2 > 0)
             {
                 break;

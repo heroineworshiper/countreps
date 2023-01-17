@@ -25,6 +25,7 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -569,6 +570,12 @@ void* web_server(void *ptr)
 		int connection_fd = accept(fd,
                 			(struct sockaddr*)&clientname, 
 							&size);
+        int flag = 1; 
+        setsockopt(connection_fd, 
+            IPPROTO_TCP, 
+            TCP_NODELAY, 
+            (char *)&flag, 
+            sizeof(int));
 
 //printf("web_server %d: accept\n", __LINE__);
 

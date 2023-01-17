@@ -19,7 +19,7 @@
  */
 
 // parse IR codes from the servo/IR board
-
+// gcc -o irlib irlib.c -DSTANDALONE
 
 
 #include <stdio.h>
@@ -77,6 +77,7 @@ void process_code(uint8_t c)
     if(c == IR_TIMEOUT)
     {
         printf(" timeout\n");
+        button = NO_BUTTON;
         offset = 0;
     }
     else
@@ -102,16 +103,19 @@ void process_code(uint8_t c)
     {
         int i;
         offset = 0;
-        for(button = 0; button < TOTAL_BUTTONS; button++)
+        int new_button = NO_BUTTON;
+        for(new_button = 0; new_button < TOTAL_BUTTONS; new_button++)
         {
             for(i = 0; i < CODE_BYTES; i++)
             {
-                if((CODE[i] ^ button) != buffer[i]) break;
+                if((CODE[i] ^ new_button) != buffer[i]) break;
             }
             if(i >= CODE_BYTES) break;
         }
-        if(button < TOTAL_BUTTONS)
+
+        if(new_button < TOTAL_BUTTONS && button == NO_BUTTON)
         {
+            button = new_button;
             printf("Got %s", button_strings[button]);
             fflush(stdout);
         }
@@ -123,7 +127,7 @@ void process_code(uint8_t c)
 }
 
 
-
+#ifdef STANDALONE
 
 int init_serial(const char *path)
 {
@@ -192,7 +196,7 @@ void main()
 }
 
 
-
+#endif // STANDALONE
 
 
 

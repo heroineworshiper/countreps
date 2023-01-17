@@ -71,6 +71,7 @@ OBJS := \
 	gui.o 
 
 TRACKER_OBJS := \
+        irlib.o \
 	tracker.o \
 	trackerx11.o \
 	trackerserver.o

@@ -1,6 +1,6 @@
 /*
  * Servo/IR to USB serial
- * Copyright (C) 2021 Adam Williams <broadcast at earthling dot net>
+ * Copyright (C) 2021-2023 Adam Williams <broadcast at earthling dot net>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -109,6 +109,8 @@ typedef union
 	struct
 	{
 		unsigned interrupt_complete : 1;
+        unsigned ir_wrap : 1;
+        unsigned got_ir : 1;
 	};
 	
 	unsigned char value;
@@ -141,6 +143,15 @@ void sync_code3(uint8_t c);
 void (*input_state)(uint8_t c) = sync_code0;
 uint8_t counter;
 uint8_t buffer[8];
+uint8_t tick;
+#define HZ 200
+uint8_t ir_code;
+#define IR_LOW 0
+#define IR_HIGH 1
+#define IR_REPEAT 2
+#define IR_TIMEOUT 3
+#define IR_LOW_TIME 1100
+#define IR_REPEAT_TIME 15000
 
 // UART ------------------------------------------------------------------------
 
@@ -176,6 +187,7 @@ void handle_uart_rx()
     uint8_t c = RCREG;
 }
 
+// must be in the bottom half to access ir_count
 void handle_ir(uint8_t c)
 {
     if(ir_count < IR_SIZE)
@@ -1254,21 +1266,30 @@ int main(int argc, char** argv)
     
 
 // servo 0 timer
-    T0CON = 0b10001000;
-    INTCONbits.TMR0IF = 0;
-    INTCONbits.TMR0IE = 1;
+    T3CON = 0b10000001;
+    TMR3IF = 0;
+    TMR3IE = 1;
 
 // servo 1 timer
     T1CON = 0b10000001;
-    PIR1bits.TMR1IF = 0;
-    PIE1bits.TMR1IE = 1;
+    TMR1IF = 0;
+    TMR1IE = 1;
     
 
-// 50Hz timer
-    T3CON = 0b10110001;
-    PIR2bits.TMR3IF = 0;
-    PIE2bits.TMR3IE = 1;
-    
+// IR timer.  1:16 prescale
+    T0CON = 0b10000011;
+    TMR0IF = 0;
+    TMR0IE = 1;
+// IR interrupt
+    INT0IE = 1;
+// falling edge
+    INTEDG0 = 0;
+
+// HZ timer
+    T2CON = 0b01111111;
+    PR2 = (CLOCKSPEED / 4 / 16 / 16 / HZ) - 1;
+    TMR2IF = 0;
+    TMR2IE = 1;
 
     init_usb();
 
@@ -1313,6 +1334,14 @@ int main(int argc, char** argv)
                 SET_EP(EP2_OUT, _USIE | _DAT1 | _DTSEN, EP2_SIZE, data_out_packet)
             }
         }
+
+
+        if(flags.got_ir)
+        {
+            flags.got_ir = 0;
+            handle_ir(ir_code);
+        }
+
 
 // pass IR codes to USB
         if(ir_count > 0)
@@ -1393,9 +1422,9 @@ void __interrupt(high_priority) isr()
         }
 
 
-        if(INTCONbits.TMR0IF)
+        if(TMR3IF)
         {
-            INTCONbits.TMR0IF = 0;
+            TMR3IF = 0;
             flags.interrupt_complete = 0;
             if(SERVO0_LAT)
             {
@@ -1403,9 +1432,9 @@ void __interrupt(high_priority) isr()
             }
         }
 
-        if(PIR1bits.TMR1IF)
+        if(TMR1IF)
         {
-            PIR1bits.TMR1IF = 0;
+            TMR1IF = 0;
             flags.interrupt_complete = 0;
             if(SERVO1_LAT)
             {
@@ -1413,24 +1442,71 @@ void __interrupt(high_priority) isr()
             }
         }
 
-        if(PIR2bits.TMR3IF)
+        if(TMR2IF)
         {
-            PIR2bits.TMR3IF = 0;
-            TMR3 = -TIMER3_DELAY;
+            TMR2IF = 0;
             flags.interrupt_complete = 0;
-
-            if(pwm0 > 0)
+            tick++;
+            if(tick >= HZ / 50)
             {
-                SERVO0_LAT = 1;
-                TMR0 = -pwm0;
-                INTCONbits.TMR0IF = 0;
+                tick = 0;
+
+                if(pwm0 > 0)
+                {
+                    SERVO0_LAT = 1;
+                    TMR3 = -pwm0;
+                    TMR3IF = 0;
+                }
+
+                if(pwm1 > 0)
+                {
+                    SERVO1_LAT = 1;
+                    TMR1 = -pwm1;
+                    TMR1IF = 0;
+                }
             }
+        }
 
-            if(pwm1 > 0)
+
+        if(TMR0IF)
+        {
+            TMR0IF = 0;
+            flags.interrupt_complete = 0;
+            if(!flags.ir_wrap)
             {
-                SERVO1_LAT = 1;
-                TMR1 = -pwm1;
-                PIR1bits.TMR1IF = 0;
+                flags.ir_wrap = 1;
+                flags.got_ir = 1;
+                ir_code = IR_TIMEOUT;
+                print_text("IR TIMEOUT\n");
+            }
+        }
+
+// IR code
+        if(INT0IF)
+        {
+            INT0IF = 0;
+// get the time
+            uint16_t value = TMR0;
+            TMR0 = 0;
+
+// ignore if the timer wrapped
+            if(flags.ir_wrap)
+            {
+                flags.ir_wrap = 0;
+            }
+            else
+            {
+                flags.got_ir = 1;
+                if(value >= IR_REPEAT_TIME)
+                    ir_code = IR_REPEAT;
+                else
+                if(value >= IR_LOW_TIME) 
+                    ir_code = IR_HIGH;
+                else
+                    ir_code = IR_LOW;
+                print_text("IR: ");
+                print_number(ir_code);
+                print_text("\n");
             }
         }
 
