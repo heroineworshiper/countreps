@@ -87,7 +87,7 @@ int process_code(uint8_t c)
         printf(".");
         fflush(stdout);
         offset = 0;
-        return -1;
+        return BUTTON_REPEAT;
     }
     else
     if(c == IR_LOW)

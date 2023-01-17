@@ -132,8 +132,8 @@ public:
     int text_y2;
 // width for the video window
     int reserved_w;
-    int need_clear_video;
-
+//    int need_clear_video;
+    int prev_landscape;
 
     GUI();
 	int close_event();
@@ -160,6 +160,7 @@ void draw_video(unsigned char *src,
     int src_w,
     int src_h,
     int src_rowspan);
+void draw_startup();
 void draw_config();
 void init_gui();
 void save_defaults();
@@ -168,6 +169,7 @@ void stop_servos();
 void send_error();
 void init_server();
 void do_startup();
+void do_tracking(int lock);
 
 
 #endif

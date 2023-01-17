@@ -340,6 +340,8 @@ void* servo_reader(void *ptr)
             send_error();
 
             uint8_t buffer;
+            int repeat_count = 0;
+            int prev_button = 0;
             while(1)
             {
                 int bytes_read = read(servo_fd, &buffer, 1);
@@ -351,9 +353,39 @@ void* servo_reader(void *ptr)
                     break;
                 }
 
-#ifndef USE_IR
+#ifdef USE_IR
 // process in IR library
                 int result = process_code(buffer);
+                int need_print_values = 0;
+                int need_write_servos = 0;
+                
+                if(result == BUTTON_REPEAT &&
+                    (prev_button == LEFT ||
+                    prev_button == RIGHT ||
+                    prev_button == UP ||
+                    prev_button == DOWN))
+                {
+                    repeat_count++;
+                    if(repeat_count >= 20)
+                    {
+                        if(((repeat_count - 20) % 5) == 0)
+                        {
+                            result = prev_button;
+                        }
+                    }
+                }
+                else
+                if(result == BUTTON_RELEASED)
+                {
+                    repeat_count = 0;
+                    prev_button = -1;
+                }
+                else
+                if(result != -1)
+                {
+                    prev_button = result;
+                }
+                
                 switch(result)
                 {
                     case SELECT_BUTTON:
@@ -363,7 +395,120 @@ void* servo_reader(void *ptr)
                             draw_config();
                             do_startup();
                         }
+                        else
+                        if(current_operation == CONFIGURING)
+                        {
+                            start_pan = pan;
+                            start_tilt = tilt;
+                            ::save_defaults();
+                            current_operation = TRACKING;
+                            do_tracking(1);
+                        }
                         break;
+
+                    case BACK:
+                        if(current_operation == CONFIGURING)
+                        {
+                            current_operation = STARTUP;
+                            draw_startup();
+                            stop_servos();
+                        }
+                        else
+                        if(current_operation == TRACKING)
+                        {
+                            current_operation = CONFIGURING;
+                            draw_config();
+                        }
+                        break;
+
+                    case HOME:
+                        if(current_operation == CONFIGURING)
+                        {
+                            current_operation = STARTUP;
+                            draw_startup();
+                            stop_servos();
+                        }
+                        else
+                        if(current_operation == TRACKING)
+                        {
+                            current_operation = STARTUP;
+                            draw_startup();
+                            stop_servos();
+                        }
+                        break;
+                    
+                    case LEFT:
+                        pan -= lenses[lens].pan_step * pan_sign;
+                        need_write_servos = 1;
+                        need_print_values = 1;
+                        break;
+                    
+                    case RIGHT:
+                        pan += lenses[lens].pan_step * pan_sign;
+                        need_write_servos = 1;
+                        need_print_values = 1;
+                        break;
+                    
+                    case UP:
+                        tilt += lenses[lens].tilt_step * tilt_sign;
+                        need_write_servos = 1;
+                        need_print_values = 1;
+                        break;
+                    
+                    case DOWN:
+                        tilt -= lenses[lens].tilt_step * tilt_sign;
+                        need_write_servos = 1;
+                        need_print_values = 1;
+                        break;
+                    
+                    case PLUS:
+                        if(current_operation == CONFIGURING)
+                        {
+                            pan_sign *= -1;
+                            need_print_values = 1;
+                        }
+                        break;
+                    
+                    case MINUS:
+                        if(current_operation == CONFIGURING)
+                        {
+                            tilt_sign *= -1;
+                            need_print_values = 1;
+                        }
+                        break;
+                    
+                    case STAR:
+                        if(current_operation == CONFIGURING)
+                        {
+                            landscape = !landscape;
+                            need_print_values = 1;
+                        }
+                        break;
+                    
+                    case I_BUTTON:
+                        if(current_operation == CONFIGURING)
+                        {
+                            lens++;
+                            if(lens >= TOTAL_LENSES)
+                            {
+                                lens = 0;
+                            }
+                            need_print_values = 1;
+                        }
+                        break;
+                }
+                
+                if(need_print_values && current_operation == CONFIGURING)
+                {
+                    gui->lock_window();
+                    gui->print_values(0);
+                    gui->flash(1);
+                    gui->unlock_window();
+                }
+                
+                if(need_write_servos && current_operation != STARTUP)
+                {
+                    write_servos(1);
                 }
 #endif // USE_IR
 
@@ -1904,25 +2049,7 @@ int main(int argc, char *argv[])
 
 
 #ifndef USE_SERVER
-    gui->lock_window();
-    gui->set_font(LARGEFONT);
-    gui->set_color(WHITE);
-    int text_h = gui->get_text_height(LARGEFONT, "q0");
-    int y = text_h + MARGIN;
-    int x = MARGIN;
-    gui->draw_text(x, 
-        y, 
-        "Welcome to the tracker\n\n"
-#ifdef USE_KEYBOARD
-        "Press SPACE or ENTER to activate the mount\n\n"
-        "ESC to give up & go to a movie.");
-#endif
-#ifdef USE_IR
-        "Press SELECT to activate the motors");
-#endif
-
-    gui->flash(1);
-    gui->unlock_window();
+    draw_startup();
 #endif // USE_SERVER
 
 

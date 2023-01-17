@@ -1,6 +1,6 @@
 /*
  * X11 GUI for the tracking camera
- * Copyright (C) 2019-2021 Adam Williams <broadcast at earthling dot net>
+ * Copyright (C) 2019-2023 Adam Williams <broadcast at earthling dot net>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -73,6 +73,7 @@ GUI::GUI() : BC_Window("Tracker",
     BLACK) // bg_color
 {
     reserved_w = WINDOW_W * 3 / 4;
+    prev_landscape = -1;
 }
 
 int GUI::close_event()
@@ -85,12 +86,22 @@ void GUI::print_values(int flash_it)
 {
     char string[BCTEXTLEN];
     sprintf(string, 
+#ifdef USE_KEYBOARD
         "PAN (a,d) = %d\n"
         "TILT (w,s) = %d\n"
         "PAN_SIGN (p) = %d\n"
         "TILT_SIGN (t) = %d\n"
         "LENS (l) = %s\n"
         "ROTATION (r) = %s", 
+#endif
+#ifdef USE_IR
+        "PAN (LEFT,RIGHT) = %d\n"
+        "TILT (UP,DOWN) = %d\n"
+        "PAN_SIGN (+) = %d\n"
+        "TILT_SIGN (-) = %d\n"
+        "LENS (i) = %s\n"
+        "ROTATION (*) = %s", 
+#endif
         (int)(pan - (MAX_PWM + MIN_PWM) / 2),
         (int)(tilt - (MAX_PWM + MIN_PWM) / 2),
         pan_sign,
@@ -147,8 +158,7 @@ int GUI::keypress_event()
                 start_tilt = tilt;
                 ::save_defaults();
                 current_operation = TRACKING;
-                clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
-                flash(1);
+                do_tracking(0);
             }
             break;
 
@@ -189,7 +199,7 @@ int GUI::keypress_event()
         case 'r':
             landscape = !landscape;
             need_print_values = 1;
-            need_clear_video = 1;
+//            need_clear_video = 1;
             break;
 
         case 'l':
@@ -322,7 +332,8 @@ void draw_video(unsigned char *src,
     }
 
     gui->lock_window();
-    if(gui->need_clear_video)
+//    if(gui->need_clear_video)
+    if(gui->prev_landscape != landscape)
     {
 // printf("draw_video %d x=%d y=%d w=%d h=%d\n",
 // __LINE__,
@@ -335,7 +346,8 @@ void draw_video(unsigned char *src,
             gui->reserved_w,
             WINDOW_H);
         gui->flash(0);
-        gui->need_clear_video = 0;
+//        gui->need_clear_video = 0;
+        gui->prev_landscape = landscape;
     }
 
     gui->draw_bitmap(gui_bitmap, 
@@ -355,6 +367,30 @@ void send_error()
 {
 }
 
+void draw_startup()
+{
+    gui->lock_window();
+    gui->clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
+    gui->set_font(LARGEFONT);
+    gui->set_color(WHITE);
+    int text_h = gui->get_text_height(LARGEFONT, "q0");
+    int y = text_h + MARGIN;
+    int x = MARGIN;
+    gui->draw_text(x, 
+        y, 
+        "Welcome to the tracker\n\n"
+#ifdef USE_KEYBOARD
+        "Press SPACE or ENTER to activate the mount\n\n"
+        "ESC to give up & go to a movie.");
+#endif
+#ifdef USE_IR
+        "Press SELECT to activate the motors");
+#endif
+
+    gui->flash(1);
+    gui->unlock_window();
+}
+
 void draw_config()
 {
     gui->lock_window();
@@ -367,18 +403,18 @@ void draw_config()
     sprintf(string,
         "Press keys to aim the mount.\n\n"
         "PWM Values should be as\n"
-        "close to 0 as possible.\n"
-//                         "a - left\n"
-//                         "d - right\n"
-//                         "w - up\n"
-//                         "s - down\n"
-//                         "t - invert tilt sign\n"
-//                         "p - invert pan sign\n"
-//                         "l - change lens\n"
-//                         "r - rotate the camera\n"
+        "close to 0 as possible.\n\n"
+
+#ifdef USE_KEYBOARD
         "SPACE or ENTER to save defaults & \n"
-        "begin tracking\n"
+        "begin tracking\n\n"
         "ESC to give up & go to a movie.");
+#endif
+#ifdef USE_IR
+        "SELECT to save defaults & \nbegin tracking\n\n"
+        "BACK/HOME to give up & go to a movie.");
+#endif
+
     gui->draw_text(x, 
         y, 
         string);
@@ -390,7 +426,13 @@ void draw_config()
     gui->unlock_window();
 }
 
-
+void do_tracking(int lock)
+{
+    if(lock) gui->lock_window();
+    gui->clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
+    gui->flash(1);
+    if(lock) gui->unlock_window();
+}
 
 
 

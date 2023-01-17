@@ -48,8 +48,9 @@ const uint8_t CODE[] = { 0xac, 0xf4, 0x56, 0x6a };
 #define IR_REPEAT 2
 #define IR_TIMEOUT 3
 
-// returns the button pressed, BUTTON_RELEASED, or -1
+// returns the button pressed, BUTTON_REPEAT, BUTTON_RELEASED, or -1
 #define BUTTON_RELEASED 17
+#define BUTTON_REPEAT 18
 int process_code(uint8_t c);
 
 
