@@ -137,43 +137,8 @@ int GUI::keypress_event()
             if(current_operation == STARTUP)
             {
                 current_operation = CONFIGURING;
-                clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
-                int text_h = get_text_height(LARGEFONT, "q0");
-                int y = text_h + MARGIN;
-                int x = MARGIN;
-                set_color(WHITE);
-                char string[BCTEXTLEN];
-                sprintf(string,
-                    "Press keys to aim the mount.\n\n"
-                    "PWM Values should be as\n"
-                    "close to 0 as possible.\n"
-//                         "a - left\n"
-//                         "d - right\n"
-//                         "w - up\n"
-//                         "s - down\n"
-//                         "t - invert tilt sign\n"
-//                         "p - invert pan sign\n"
-//                         "l - change lens\n"
-//                         "r - rotate the camera\n"
-                    "SPACE or ENTER to save defaults & \n"
-                    "begin tracking\n"
-                    "ESC to give up & go to a movie.");
-                draw_text(x, 
-                    y, 
-                    string);
-                text_y2 = y + get_text_height(LARGEFONT, string) + text_h;
-
-                print_values(0);
-                flash(1);
-
-// write it a few times to defeat UART initialization glitches
-                write_servos(1);
-                usleep(100000);
-                write_servos(1);
-                usleep(100000);
-                write_servos(1);
-                usleep(100000);
-                write_servos(1);
+                draw_config();
+                do_startup();
             }
             else
             if(current_operation == CONFIGURING)
@@ -385,6 +350,46 @@ void draw_video(unsigned char *src,
 	    dst_h);
     gui->unlock_window();
 }
+
+void send_error()
+{
+}
+
+void draw_config()
+{
+    gui->lock_window();
+    gui->clear_box(0, 0, WINDOW_W, WINDOW_H, 0);
+    int text_h = gui->get_text_height(LARGEFONT, "q0");
+    int y = text_h + MARGIN;
+    int x = MARGIN;
+    gui->set_color(WHITE);
+    char string[BCTEXTLEN];
+    sprintf(string,
+        "Press keys to aim the mount.\n\n"
+        "PWM Values should be as\n"
+        "close to 0 as possible.\n"
+//                         "a - left\n"
+//                         "d - right\n"
+//                         "w - up\n"
+//                         "s - down\n"
+//                         "t - invert tilt sign\n"
+//                         "p - invert pan sign\n"
+//                         "l - change lens\n"
+//                         "r - rotate the camera\n"
+        "SPACE or ENTER to save defaults & \n"
+        "begin tracking\n"
+        "ESC to give up & go to a movie.");
+    gui->draw_text(x, 
+        y, 
+        string);
+    gui->text_y2 = y + gui->get_text_height(LARGEFONT, string) + text_h;
+
+    gui->print_values(0);
+    gui->flash(1);
+
+    gui->unlock_window();
+}
+
 
 
 

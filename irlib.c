@@ -39,7 +39,7 @@ static int offset = 0;
 static uint8_t buffer[CODE_BYTES];
 static int button = NO_BUTTON;
 
-const uint8_t *button_strings[] = 
+const char *button_strings[] = 
 {
     "NO_BUTTON",
     "STAR",
@@ -71,7 +71,7 @@ void shift_buffer()
     offset++;
 }
 
-void process_code(uint8_t c)
+int process_code(uint8_t c)
 {
 //    printf("process_code %x\n", c);
     if(c == IR_TIMEOUT)
@@ -79,6 +79,7 @@ void process_code(uint8_t c)
         printf(" timeout\n");
         button = NO_BUTTON;
         offset = 0;
+        return BUTTON_RELEASED;
     }
     else
     if(c == IR_REPEAT)
@@ -86,6 +87,7 @@ void process_code(uint8_t c)
         printf(".");
         fflush(stdout);
         offset = 0;
+        return -1;
     }
     else
     if(c == IR_LOW)
@@ -118,12 +120,11 @@ void process_code(uint8_t c)
             button = new_button;
             printf("Got %s", button_strings[button]);
             fflush(stdout);
-        }
-        else
-        {
-            button = NO_BUTTON;
+            return button;
         }
     }
+    
+    return -1;
 }
 
 

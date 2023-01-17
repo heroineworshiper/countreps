@@ -33,6 +33,10 @@
 // Phone GUI
 //#define USE_SERVER
 
+// keyboard or IR
+//#define USE_KEYBOARD
+#define USE_IR
+
 #define WINDOW_W 1920
 #define WINDOW_H 1080
 #define SERVER_W 640
@@ -156,13 +160,14 @@ void draw_video(unsigned char *src,
     int src_w,
     int src_h,
     int src_rowspan);
+void draw_config();
 void init_gui();
 void save_defaults();
 void write_servos(int use_pwm_limits);
 void stop_servos();
 void send_error();
 void init_server();
-
+void do_startup();
 
 
 #endif

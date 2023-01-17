@@ -33,7 +33,7 @@ const uint8_t CODE[] = { 0xac, 0xf4, 0x56, 0x6a };
 #define HOME 6
 #define LEFT 7
 #define RIGHT 8
-#define SELECT 9
+#define SELECT_BUTTON 9
 #define DOWN 10
 #define TV_INPUT 11
 #define POWER 12
@@ -48,8 +48,9 @@ const uint8_t CODE[] = { 0xac, 0xf4, 0x56, 0x6a };
 #define IR_REPEAT 2
 #define IR_TIMEOUT 3
 
-
-void process_code(uint8_t c);
+// returns the button pressed, BUTTON_RELEASED, or -1
+#define BUTTON_RELEASED 17
+int process_code(uint8_t c);
 
 
 #endif

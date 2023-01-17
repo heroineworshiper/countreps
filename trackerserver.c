@@ -330,14 +330,7 @@ void* web_server_reader(void *ptr)
 
                         send_status(connection);
 
-// write it a few times to defeat UART initialization glitches
-                        write_servos(1);
-                        usleep(100000);
-                        write_servos(1);
-                        usleep(100000);
-                        write_servos(1);
-                        usleep(100000);
-                        write_servos(1);
+                        do_startup();
                     }
                 }
                 else

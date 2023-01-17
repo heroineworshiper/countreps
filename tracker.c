@@ -350,11 +350,24 @@ void* servo_reader(void *ptr)
                     servo_fd = -1;
                     break;
                 }
+
+#ifndef USE_IR
 // process in IR library
-                process_code(buffer);
-                
-                
-                
+                int result = process_code(buffer);
+                switch(result)
+                {
+                    case SELECT_BUTTON:
+                        if(current_operation == STARTUP)
+                        {
+                            current_operation = CONFIGURING;
+                            draw_config();
+                            do_startup();
+                        }
+                        break;
+                }
+#endif // USE_IR
+
+
             }
             //printf("%c", buffer);
             //fflush(stdout);
@@ -450,6 +463,18 @@ void stop_servos()
     }    
 }
 
+
+void do_startup()
+{
+// write it a few times to defeat UART initialization glitches
+    write_servos(1);
+    usleep(100000);
+    write_servos(1);
+    usleep(100000);
+    write_servos(1);
+    usleep(100000);
+    write_servos(1);
+}
 
 
 void load_defaults()
@@ -657,7 +682,7 @@ public:
             frame_size2 = frame_size;
             if(frame_size2 > 0)
             {
-                rawData.reserveBuffer(frame_size);
+                rawData.reserve(frame_size);
                 memcpy(rawData.ptr(), reader_buffer3, frame_size);
 //                cv::Mat rawData(1, frame_size, CV_8UC1, (void*)reader_buffer3);
 // invalidate the image for the next workProducer call
@@ -1888,8 +1913,14 @@ int main(int argc, char *argv[])
     gui->draw_text(x, 
         y, 
         "Welcome to the tracker\n\n"
+#ifdef USE_KEYBOARD
         "Press SPACE or ENTER to activate the mount\n\n"
         "ESC to give up & go to a movie.");
+#endif
+#ifdef USE_IR
+        "Press SELECT to activate the motors");
+#endif
+
     gui->flash(1);
     gui->unlock_window();
 #endif // USE_SERVER

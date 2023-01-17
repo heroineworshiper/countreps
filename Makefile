@@ -115,6 +115,7 @@ $(TRACKER_OBJS):
 
 countreps.o: countreps.c
 gui.o: gui.c
+irlib.o: irlib.c
 tracker.o: tracker.c
 trackerx11.o: trackerx11.c
 trackerserver.o: trackerserver.c
