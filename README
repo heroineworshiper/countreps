@@ -6,9 +6,82 @@ tracker: camera tracker using openpose
 comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack
 
 
+enclosure4.FCStd: enclosure for a jetson nano terminal
+    .8mm nozzle .32 layer height for
+        outer case + bottom
+            - intersect with outer masks in blender to get print sections
+            - use support for battery latch
+        inner case
+            - intersect with inner mask in blender
+            - use support for card slots
+        back panel
+            - intersect with back mask in blender
+        stand
+            - intersect with back mask in blender
+        cam
+        ir
+    .4mm nozzle .32 layer height for 
+        clips
+        outer joiners
+        inner joiners
+        lid joiners
+        - wall direction of the corner joiners must be printed flat on the bed
+        - flat joiners must be printed flat on the bed
+        - use binder clips
+    M3 self tappers for case
+    M2 self tappers for speakers
+    Speakers are arduino speakers
+    16 gauge metal rod for hinges
+    6mm x 3mm magnets
+    
+
+--------------------------------------------------------------------------------
+Jetson notes:
+
+Create an /etc/rc.local file for initialization.
+It must be mode 777 & begin with:
+#!/bin/sh -e
+
+Install fvwm:
+apt install fvwm
+
+Copy /usr/share/fvwm/system.fvwm2rc from a previous fvwm installation.
+Add lines to disable the window border.
+
+Style "Countreps" NoTitle, HandleWidth 0
+Style "Tracker" NoTitle, HandleWidth 0
 
 
+Building openpose on the jetson follows the directions for Ubunt:
 
+git clone https://github.com/CMU-Perceptual-Computing-Lab/openpose
+
+Install dependencies:
+apt install libprotobuf-dev protobuf-compiler libgoogle-glog-dev
+apt install libboost-all-dev libhdf5-dev libatlas-base-dev
+
+The jetson image has all the CUDA dependencies preinstalled.
+
+cd openpose
+mkdir build
+cd build
+cmake ..
+
+make -j4
+
+An error about cublas_device requires deleting every reference to cublas_device in
+/usr/share/cmake-3.10
+
+The models must be downloaded after building.
+cd models
+./getModels.sh
+
+The demos can be run with
+./build/examples/openpose/openpose.bin --net_resolution -1x128 --camera 0 --camera_resolution 1280x720
+but don't work.
+
+
+--------------------------------------------------------------------------------
 
 Compiling countreps is a matter of
 
