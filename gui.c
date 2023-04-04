@@ -23,16 +23,58 @@
 #include "guicast.h"
 #include "keys.h"
 #include "mutex.h"
+#include "gui.h"
+#include "countreps.h"
 
-#define W 1920
-#define H 1040
-#define VIDEO_W (H * 4 / 3)
+//#define W 1920
+//#define H 1040
+#define W 1366
+#define H 768
+// where to draw the vijeo
+#define VIDEO_W (H * w / h)
+//#define VIDEO_W (H * 16 / 9)
+//#define VIDEO_W H
 #define VIDEO_H H
+#define VIDEO_X ((W - VIDEO_W) / 2)
 #define TEXT_X VIDEO_W
-#define FONT "impact.ttf"
-#define BIGTEXT 512
-#define LITTLETEXT 256
+//#define FONT "impact.ttf"
+#define FONT "arial.ttf"
+//#define BIGTEXT 512
+//#define LITTLETEXT 256
+#define BIGTEXT 256
+#define LITTLETEXT 128
+#define FPS_SIZE 50
 
+// from include/openpose/pose/poseParametersRender.hpp: POSE_BODY_25_COLORS_RENDER_GPU
+uint32_t colors[] =
+{
+    0x80ff0055, // NOSE
+    0x80ff0000, // NECK
+    0x80ff5500, // SHOULDER2
+    0x80ffaa00, // ELBOW2 orange
+    0x80ffff00, // WRIST2
+    0x80aaff00, // SHOULDER1 light green
+    0x8055ff00, // ELBOW1
+    0x8000ff00, // WRIST1
+    0x80ff0000, // BUTT
+    0x8000ff55, // HIP2
+    0x8000ffaa,  // KNEE2
+    0x8000ffff, // ANKLE2
+    0x8000aaff, // HIP1
+    0x800055ff, // KNEE1
+    0x800000ff, // ANKLE1
+    0x80ff00aa, // REYE
+    0x80aa00ff, // LEYE
+    0x80ff00ff, // LEAR
+    0x805500ff, // REAR
+    0x800000ff, 
+    0x800000ff, 
+    0x800000ff, 
+    0x8000ffff, 
+    0x8000ffff, 
+    0x8000ffff, 
+};
+#define TOTAL_COLORS (sizeof(colors) / sizeof(int))
 
 const char *exercise_to_text[] =
 {
@@ -262,7 +304,8 @@ void init_gui()
 
     
     gui = new GUI();
-    gui->start_video();
+// don't use a back buffer
+//    gui->start_video();
     bitmap = new BC_Bitmap(gui, 
 	    W,
 	    H,
@@ -282,8 +325,9 @@ void draw_text(int x, int y, int size, const char *text)
 {
     int len = strlen(text);
     unsigned char **dst_rows = bitmap->get_row_pointers();
+// The text color
     int r = 0;
-    int g = 0;
+    int g = 0xff;
     int b = 0;
     int out_x = x;
     int out_y = y;
@@ -352,7 +396,9 @@ void update_gui(unsigned char *src,
     int w, 
     int h, 
     int reps, 
-    int exercise)
+    int exercise,
+    float fps,
+    int bgr)
 {
     if (reps != prev_reps || exercise != prev_exercise) {
 
@@ -391,23 +437,48 @@ void update_gui(unsigned char *src,
     for(int i = 0; i < VIDEO_H; i++)
     {
         unsigned char *src_row = src + nearest_y[i] * w * 3;
-        unsigned char *dst_row = dst_rows[i];
-        for(int j = 0; j < VIDEO_W; j++)
+        unsigned char *dst_row = dst_rows[i] + VIDEO_X * 4;
+
+
+        if(bgr)
         {
-            int src_x = nearest_x[j];
-            *dst_row++ = src_row[src_x * 3 + 0];
-            *dst_row++ = src_row[src_x * 3 + 1];
-            *dst_row++ = src_row[src_x * 3 + 2];
-            dst_row++;
+            for(int j = 0; j < VIDEO_W; j++)
+            {
+                int src_x = nearest_x[j];
+    // SRC=RGB DST=BGR
+                *dst_row++ = src_row[src_x * 3 + 2];
+                *dst_row++ = src_row[src_x * 3 + 1];
+                *dst_row++ = src_row[src_x * 3 + 0];
+                dst_row++;
+            }
+        }
+        else
+        {
+            for(int j = 0; j < VIDEO_W; j++)
+            {
+                int src_x = nearest_x[j];
+    // SRC=RGB DST=RGB
+                *dst_row++ = src_row[src_x * 3 + 0];
+                *dst_row++ = src_row[src_x * 3 + 1];
+                *dst_row++ = src_row[src_x * 3 + 2];
+                dst_row++;
+            }
         }
     }    
 
 // draw the status
     char string[BCTEXTLEN];
-    sprintf(string, "%d", reps);
-    draw_text(TEXT_X, H / 2, BIGTEXT, string);
 
-    draw_text(TEXT_X, H * 3 / 4, LITTLETEXT, exercise_to_text[exercise]);
+    if(fps > 0)
+    {
+        sprintf(string, "%.2f FPS", fps);
+        draw_text(25, 50, FPS_SIZE, string);
+    }
+//     sprintf(string, "%d", reps);
+//     draw_text(TEXT_X, H / 2, BIGTEXT, string);
+//     draw_text(TEXT_X, H * 3 / 4, LITTLETEXT, exercise_to_text[exercise]);
+
+    
 
     gui->lock_window();
     gui->draw_bitmap(bitmap, 
@@ -420,6 +491,82 @@ void update_gui(unsigned char *src,
 	    0,
 	    W,
 	    H);
+
+    gui->unlock_window();
+}
+
+
+void join_body_parts(int bodyPart1, 
+    int bodyPart2, 
+    int *xy_array, 
+    int decoded_w, 
+    int decoded_h)
+{
+    int x1 = xy_array[bodyPart1 * 2 + 0] * W / decoded_w;
+    int y1 = xy_array[bodyPart1 * 2 + 1] * H / decoded_h;
+    int x2 = xy_array[bodyPart2 * 2 + 0] * W / decoded_w;
+    int y2 = xy_array[bodyPart2 * 2 + 1] * H / decoded_h;
+    if((x1 > 0 || y1 > 0) && (x2 > 0 || y2 > 0))
+    {
+        gui->set_color(colors[bodyPart1] & 0xffffff);
+        gui->set_line_width(5);
+        gui->draw_line(x1, y1, x2, y2);
+        gui->set_line_width(1);
+    }
+}
+
+
+void draw_body(int *xy_array, int decoded_w, int decoded_h)
+{
+    gui->lock_window();
+
+// draw the body parts
+    for(int j = 0; j < TOTAL_COLORS; j++)
+    {
+        int x = xy_array[j * 2] * W / decoded_w;
+        int y = xy_array[j * 2 + 1] * H / decoded_h;
+//printf("draw_body %d: %d %d\n", __LINE__, x, y);
+        if(x > 0 || y > 0)
+        {
+#define PART_SIZE 20
+            gui->set_color(colors[j] & 0xffffff);
+            gui->draw_disc(x - PART_SIZE / 2, y - PART_SIZE / 2, PART_SIZE, PART_SIZE);
+        }
+    }
+
+    join_body_parts(MODEL_SHOULDER1, MODEL_NECK, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_SHOULDER2, MODEL_NECK, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_ELBOW2, MODEL_SHOULDER2, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_ELBOW1, MODEL_SHOULDER1, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_WRIST2, MODEL_ELBOW2, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_WRIST1, MODEL_ELBOW1, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_NECK, MODEL_BUTT, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_HIP1, MODEL_BUTT, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_HIP2, MODEL_BUTT, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_KNEE1, MODEL_HIP1, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_KNEE2, MODEL_HIP2, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_ANKLE1, MODEL_KNEE1, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_ANKLE2, MODEL_KNEE2, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_NOSE, MODEL_NECK, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_EYE2, MODEL_NOSE, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_EYE1, MODEL_NOSE, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_EAR1, MODEL_EYE1, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_EAR2, MODEL_EYE2, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_HEEL1, MODEL_ANKLE1, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_HEEL2, MODEL_ANKLE2, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_BIGTOE1, MODEL_ANKLE1, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_BIGTOE2, MODEL_ANKLE2, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_SMALLTOE1, MODEL_BIGTOE1, xy_array, decoded_w, decoded_h);
+    join_body_parts(MODEL_SMALLTOE2, MODEL_BIGTOE2, xy_array, decoded_w, decoded_h);
+
+
+    gui->unlock_window();
+}
+
+void flash_gui()
+{
+    gui->lock_window();
+    gui->flash();
     gui->unlock_window();
 }
 

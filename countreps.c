@@ -38,6 +38,7 @@
 
 
 // OpenPose dependencies
+#include <opencv2/opencv.hpp>
 #include <openpose/headers.hpp>
 
 // data ingestor
@@ -75,6 +76,18 @@
 // write output frames in test_output
 //#define READ_INPUT
 
+// read frames from video4linux
+#define READ_V4L2
+#ifdef READ_V4L2
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <linux/videodev2.h>
+#include <fcntl.h>
+#endif
+
+
+// read frames from opencv's webcam driver
+//#define READ_WEBCAM
 
 // read the coordinates from DEBUG_COORDS & print the results without
 // doing anything else
@@ -110,6 +123,15 @@
 #endif
 
 #define TEXTLEN 1024
+#define TO_MS(x) ((x).tv_sec * 1000 + (x).tv_usec / 1000)
+// max frame rate to limit power usage
+#define FPS 30
+
+// error bits
+#define VIDEO_DEVICE_ERROR 1
+#define VIDEO_BUFFER_ERROR 2
+#define SERVO_ERROR 4
+uint8_t error_flags;
 
 // reps must be separated by this many frames
 #define DEBOUNCE 4
@@ -198,7 +220,6 @@ int frames = 0;
 class FrameInput;
 class Process;
 
-std::shared_ptr<FrameInput> frame_input = nullptr;
 std::shared_ptr<Process> frame_output = nullptr;
 int server_socket = -1;
 int udp_read = -1;
@@ -231,6 +252,429 @@ void unlock_sema(void *ptr)
     dispatch_semaphore_signal(*sema);
 #endif
 }
+
+
+
+
+
+#ifdef READ_V4L2
+
+// video devices
+#define VIDEO0 0
+#define VIDEO1 4
+//#define VIDEO_W 1280
+//#define VIDEO_H 720
+#define VIDEO_W 640
+#define VIDEO_H 360
+
+#define VIDEO_BUFFERS 2
+
+
+
+class V4l2Input : public op::WorkerProducer<std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>>
+{
+public:
+    static int initialized;
+    static int frame_count;
+    static int fps_frame_count;
+#define BUFSIZE2 0x400000
+// compressed frame from the hardware
+    static unsigned char reader_buffer3[BUFSIZE2];
+// size of the frame in reader_buffer3
+    static int frame_size;
+    static pthread_mutex_t frame_lock;
+// workProducer waits for this
+    static sem_t frame_ready_sema;
+    
+    int fd;
+    unsigned char *mmap_buffer[VIDEO_BUFFERS];
+
+    void initializationOnThread() 
+    {
+        fd = -1;
+    }
+
+    static void* entrypoint(void *ptr)
+    {
+        V4l2Input *thread = (V4l2Input*)ptr;
+        thread->reader_thread();
+    }
+
+    void send_error()
+    {
+    }
+
+    void reader_thread()
+    {
+        struct timeval time1;
+        struct timespec fps_time1;
+        gettimeofday(&time1, 0);
+
+        int current_path = VIDEO0;
+        int verbose = 0;
+
+//        printf("HDMIInput::reader_thread %d\n", __LINE__);
+        while(1)
+        {
+            if(fd < 0)
+            {
+                if(verbose) printf("V4l2Input::reader_thread %d opening video4linux\n", __LINE__);
+
+// probe for the video device
+                char string[TEXTLEN];
+                sprintf(string, "/dev/video%d", current_path);
+                fd = open(string, O_RDWR);
+
+                if(fd < 0)
+                {
+                    if(!(error_flags & VIDEO_DEVICE_ERROR))
+                    {
+                        printf("V4l2Input::reader_thread %d: failed to open %s\n",
+                            __LINE__,
+                            string);
+                    }
+                    error_flags |= VIDEO_DEVICE_ERROR;
+                    send_error();
+                    sleep(1);
+                }
+                else
+                {
+
+                    if(verbose) printf("V4l2Input::reader_thread %d: opened %s\n",
+                        __LINE__,
+                        string);
+
+                    struct v4l2_format v4l2_params;
+                    v4l2_params.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                    ioctl(fd, VIDIOC_G_FMT, &v4l2_params);
+
+                    if(verbose) printf("HDMIInput::reader_thread %d: default format=%c%c%c%c w=%d h=%d\n",
+                        __LINE__,
+                        v4l2_params.fmt.pix.pixelformat & 0xff,
+                        (v4l2_params.fmt.pix.pixelformat >> 8) & 0xff,
+                        (v4l2_params.fmt.pix.pixelformat >> 16) & 0xff,
+                        (v4l2_params.fmt.pix.pixelformat >> 24) & 0xff,
+                        v4l2_params.fmt.pix.width,
+                        v4l2_params.fmt.pix.height);
+
+// reject it if it's the wrong resolution, since it's the laptop webcam
+//                     if(v4l2_params.fmt.pix.width != VIDEO_W ||
+//                         v4l2_params.fmt.pix.height != VIDEO_H)
+//                     {
+//                         if(!(error_flags & VIDEO_DEVICE_ERROR))
+//                         {
+//                             printf("V4l2Input::reader_thread %d %dx%d wrong camera\n",
+//                                 __LINE__,
+//                                 v4l2_params.fmt.pix.width,
+//                                 v4l2_params.fmt.pix.height);
+//                         }
+//                         error_flags |= VIDEO_DEVICE_ERROR;
+//                         send_error();
+//                         close(fd);
+//                         fd = -1;
+//                         sleep(1);
+//                     }
+//                     else
+                    {
+                        if((error_flags & VIDEO_DEVICE_ERROR))
+                        {
+                            printf("V4l2Input::reader_thread %d: opened %s\n",
+                                __LINE__,
+                                string);
+                            error_flags &= ~VIDEO_DEVICE_ERROR;
+                            send_error();
+                        }
+
+                        v4l2_params.fmt.pix.width = VIDEO_W;
+                        v4l2_params.fmt.pix.height = VIDEO_H;
+
+                        v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
+                        if(ioctl(fd, VIDIOC_S_FMT, &v4l2_params) < 0)
+                        {
+                            printf("HDMIInput::reader_thread %d: VIDIOC_S_FMT failed\n",
+                                __LINE__);
+                        }
+                    }
+                }
+
+                if(fd >= 0)
+                {
+//                     struct v4l2_jpegcompression jpeg_opts;
+//                     if(ioctl(fd, VIDIOC_G_JPEGCOMP, &jpeg_opts) < 0)
+//                     {
+//                         printf("V4l2Input::reader_thread %d: VIDIOC_G_JPEGCOMP failed\n",
+//                             __LINE__);
+//                     }
+//                     printf("V4l2Input::reader_thread %d: quality=%d\n",
+//                         __LINE__,
+//                         jpeg_opts.quality);
+//                     
+//                     if(ioctl(fd, VIDIOC_S_JPEGCOMP, &jpeg_opts) < 0)
+//                     {
+//                         printf("V4l2Input::reader_thread %d: VIDIOC_S_JPEGCOMP failed\n",
+//                             __LINE__);
+//                     }
+
+                    struct v4l2_requestbuffers requestbuffers;
+                    requestbuffers.count = VIDEO_BUFFERS;
+                    requestbuffers.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+                    requestbuffers.memory = V4L2_MEMORY_MMAP;
+                    if(ioctl(fd, VIDIOC_REQBUFS, &requestbuffers) < 0)
+                    {
+                        printf("V4l2Input::reader_thread %d: VIDIOC_REQBUFS failed\n",
+                            __LINE__);
+                    }
+                    else
+                    {
+                        for(int i = 0; i < VIDEO_BUFFERS; i++)
+                        {
+                            struct v4l2_buffer buffer;
+                            buffer.type = requestbuffers.type;
+                            buffer.index = i;
+                            
+                            if(ioctl(fd, VIDIOC_QUERYBUF, &buffer) < 0)
+				            {
+					            printf("V4l2Input::reader_thread %d: VIDIOC_QUERYBUF failed\n",
+                                    __LINE__);
+				            }
+                            else
+                            {
+                                mmap_buffer[i] = (unsigned char*)mmap(NULL,
+					                buffer.length,
+					                PROT_READ | PROT_WRITE,
+					                MAP_SHARED,
+					                fd,
+					                buffer.m.offset);
+                                if(verbose) printf("V4l2Input::reader_thread %d: allocated buffer size=%d\n",
+                                    __LINE__,
+                                    buffer.length);
+                                if(ioctl(fd, VIDIOC_QBUF, &buffer) < 0)
+                                {
+                                    printf("V4l2Input::reader_thread %d: VIDIOC_QBUF failed\n",
+                                        __LINE__);
+                                }
+                            }
+                        }
+                    }
+                    
+                    int streamon_arg = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	                if(ioctl(fd, VIDIOC_STREAMON, &streamon_arg) < 0)
+                    {
+		                printf("V4l2Input::reader_thread %d: VIDIOC_STREAMON failed\n",
+                            __LINE__);
+                    }
+                    clock_gettime(CLOCK_MONOTONIC, &fps_time1);
+                }
+            }
+
+
+            if(fd >= 0)
+            {
+                struct v4l2_buffer buffer;
+		        bzero(&buffer, sizeof(buffer));
+                buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		        buffer.memory = V4L2_MEMORY_MMAP;
+                if(ioctl(fd, VIDIOC_DQBUF, &buffer) < 0)
+                {
+                    printf("V4l2Input::reader_thread %d: VIDIOC_DQBUF failed\n",
+                        __LINE__);
+                    error_flags |= VIDEO_BUFFER_ERROR;
+                    send_error();
+                    close(fd);
+                    fd = -1;
+                    sleep(1);
+                }
+                else
+                {
+                    error_flags &= ~VIDEO_BUFFER_ERROR;
+                    error_flags &= ~VIDEO_DEVICE_ERROR;
+                    send_error();
+                    unsigned char *ptr = mmap_buffer[buffer.index];
+                    if(verbose) printf("V4l2Input::reader_thread %d: index=%d size=%d %02x %02x %02x %02x %02x %02x %02x %02x\n",
+                        __LINE__,
+                        buffer.index,
+                        buffer.bytesused,
+                        ptr[0],
+                        ptr[1],
+                        ptr[2],
+                        ptr[3],
+                        ptr[4],
+                        ptr[5],
+                        ptr[6],
+                        ptr[7]);
+
+                    if(
+// variant 1
+                        (ptr[0] == 0xff && 
+                        ptr[1] == 0xd8 && 
+                        ptr[2] == 0xff && 
+                        ptr[3] == 0xdb)
+                        ||
+// variant 2
+                        (ptr[0] == 0xff && 
+                        ptr[1] == 0xd8 && 
+                        ptr[2] == 0xff && 
+                        ptr[3] == 0xe0))
+                    {
+// discard if it arrived too soon
+                        fps_frame_count++;
+                        struct timespec fps_time2;
+                        clock_gettime(CLOCK_MONOTONIC, &fps_time2);
+                        double delta = 
+                            (double)((fps_time2.tv_sec * 1000 + fps_time2.tv_nsec / 1000000) -
+                            (fps_time1.tv_sec * 1000 + fps_time1.tv_nsec / 1000000)) / 1000;
+
+//                        if(delta >= 1.0 / FPS)
+                        if(1)
+                        {
+// send it to openpose
+                            pthread_mutex_lock(&frame_lock);
+                            memcpy(reader_buffer3, ptr, buffer.bytesused);
+                            frame_size = buffer.bytesused;
+                            pthread_mutex_unlock(&frame_lock);
+                            sem_post(&frame_ready_sema);
+                            fps_time1 = fps_time2;
+                        }
+
+                    }
+
+                    if(ioctl(fd, VIDIOC_QBUF, &buffer) < 0)
+                    {
+                        printf("V4l2Input::reader_thread %d: VIDIOC_QBUF failed\n",
+                            __LINE__);
+                    }
+
+                    frame_count++;
+                    struct timeval time2;
+                    gettimeofday(&time2, 0);
+                    int64_t diff = TO_MS(time2) - TO_MS(time1);
+                    if(diff >= 1000)
+                    {
+//                         printf("V4l2Input::reader_thread %d FPS: %f\n",
+//                             __LINE__,
+//                             (double)frame_count * 1000 / diff);
+                        frame_count = 0;
+                        time1 = time2;
+                    }
+
+                }
+            }
+            
+            if(fd < 0)
+            {
+                current_path++;
+                if(current_path > VIDEO1)
+                {
+                    current_path = VIDEO0;
+                }
+            }
+        }
+    }
+
+    void initialize()
+    {
+	    pthread_mutexattr_t attr;
+	    pthread_mutexattr_init(&attr);
+	    pthread_mutex_init(&frame_lock, &attr);
+        sem_init(&frame_ready_sema, 0, 0);
+
+	    pthread_t reader_tid;
+	    pthread_create(&reader_tid, 
+		    0, 
+		    entrypoint, 
+		    this);
+
+        initialized = 1;
+    }
+
+
+    std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>> workProducer()
+    {
+
+        if(!initialized)
+        {
+            initialize();
+        }
+
+// Create new datum
+        auto datumsPtr = std::make_shared<std::vector<std::shared_ptr<op::Datum>>>();
+        datumsPtr->emplace_back();
+        auto& datumPtr = datumsPtr->at(0);
+        datumPtr = std::make_shared<op::Datum>();
+        int frame_size2;
+        cv::Mat rawData;
+        cv::Mat raw_image;
+
+        while(1)
+        {
+            sem_wait(&frame_ready_sema);
+            pthread_mutex_lock(&frame_lock);
+            frame_size2 = frame_size;
+            if(frame_size2 > 0)
+            {
+                rawData.reserveBuffer(frame_size);
+                memcpy(rawData.ptr(), reader_buffer3, frame_size);
+//                cv::Mat rawData(1, frame_size, CV_8UC1, (void*)reader_buffer3);
+// invalidate the image for the next workProducer call
+                frame_size = 0;
+            }
+            pthread_mutex_unlock(&frame_lock);
+
+
+
+            if(frame_size2 > 0)
+            {
+// width & height are decoded from the JPEG data in rawData
+                raw_image = imdecode(rawData, cv::IMREAD_COLOR);
+                if(raw_image.cols > 0 && raw_image.rows > 0)
+                {
+// rotate 180
+                    cv::Mat rotated;
+                    cv::rotate(raw_image,
+                        rotated,
+                        cv::RotateFlags::ROTATE_180);
+
+                    datumPtr->cvInputData = OP_CV2OPCONSTMAT(rotated);
+                }
+                else
+                {
+// try again
+                    frame_size2 = 0;
+                }
+            }
+
+            if(frame_size2 > 0)
+            {
+                break;
+            }
+        }
+
+        return datumsPtr;
+    }
+};
+
+std::shared_ptr<V4l2Input> frame_input = nullptr;
+pthread_mutex_t V4l2Input::frame_lock;
+sem_t V4l2Input::frame_ready_sema;
+int V4l2Input::initialized = 0;
+int V4l2Input::frame_count = 0;
+int V4l2Input::fps_frame_count = 0;
+unsigned char V4l2Input::reader_buffer3[BUFSIZE2];
+int V4l2Input::frame_size = 0;
+
+#endif // READ_V4L2
+
+
+
+
+
+
+
+
+
+
+
+#ifndef READ_V4L2
 
 class FrameInput : public op::WorkerProducer<std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>>
 {
@@ -338,7 +782,8 @@ public:
 
                 // Fill datum
                 cv::Mat rawData(1, frame_size, CV_8UC1, (void*)buffer);
-                datumPtr->cvInputData = imdecode(rawData, cv::IMREAD_COLOR);
+                const cv::Mat tempMat = imdecode(rawData, cv::IMREAD_COLOR);
+                datumPtr->cvInputData = OP_CV2OPCONSTMAT(tempMat);
 
                 pthread_mutex_unlock(&frame_lock);
                 unlock_sema(&frame_processed_sema);
@@ -355,8 +800,9 @@ public:
     }
 };
 
+std::shared_ptr<FrameInput> frame_input = nullptr;
 
-
+#endif // !READ_V4L2
 
 
 
@@ -377,8 +823,11 @@ public:
 // leg length during the last STANDING
     int have_prev_leg_dy = 0;
     int prev_leg_dy = -1;
-    
-    
+
+    struct timespec fps_time1;
+    struct timespec fps_time2;
+    int fps_frame_count;
+
 // the current exercise
     int plan_line = 0;
     int exercise = plan[plan_line].exercise;
@@ -393,26 +842,42 @@ public:
         printf("Process:~Process %d\n", __LINE__);
     }
 
-    void initializationOnThread() {}
+    void initializationOnThread() 
+    {
+        clock_gettime(CLOCK_MONOTONIC, &fps_time1);
+    }
 
 // get raw data from openpose
     void workConsumer(const std::shared_ptr<std::vector<std::shared_ptr<op::Datum>>>& datumsPtr)
     {
         if (datumsPtr != nullptr && !datumsPtr->empty())
         { 
-            
-            
+            fps_frame_count++;
+            clock_gettime(CLOCK_MONOTONIC, &fps_time2);
+            double delta = 
+                (double)((fps_time2.tv_sec * 1000 + fps_time2.tv_nsec / 1000000) -
+                (fps_time1.tv_sec * 1000 + fps_time1.tv_nsec / 1000000)) / 1000;
+            if(delta >= 1)
+            {
+                printf("Process::workConsumer %d %.2f FPS\n", 
+                    __LINE__, 
+                    (float)fps_frame_count / delta);
+                fps_frame_count = 0;
+                fps_time1 = fps_time2;
+            }
+
+
             const auto& poseKeypoints = datumsPtr->at(0)->poseKeypoints;
-            const auto& image = datumsPtr->at(0)->cvOutputData;
+            auto& image = datumsPtr->at(0)->cvOutputData;
             coord_t output[BODY_PARTS];
             
-            printf("Process::workConsumer %d frame=%d lions=%d w=%d h=%d channels=%d\n", 
-                __LINE__, 
-                frames,
-                poseKeypoints.getSize(0),
-                image.cols,
-                image.rows,
-                image.channels());
+//             printf("Process::workConsumer %d frame=%d lions=%d w=%d h=%d channels=%d\n", 
+//                 __LINE__, 
+//                 frames,
+//                 poseKeypoints.getSize(0),
+//                 image.cols,
+//                 image.rows,
+//                 image.channels());
             bzero(output, sizeof(output));
             for (auto lion = 0 ; lion < poseKeypoints.getSize(0) ; lion++)
             {
@@ -449,12 +914,15 @@ public:
             }
 
 // show the output frame on the GUI
-            update_gui((unsigned char*)image.ptr(0), 
-                image.cols, 
-                image.rows,
+// turning this off buys .3FPS
+            update_gui((unsigned char*)image.data(), 
+                image.cols(), 
+                image.rows(),
                 reps2,
-                exercise);
-
+                exercise,
+                0,
+                0);
+            flash_gui();
 
             if(done)
             {
@@ -1069,17 +1537,30 @@ void do_poser()
         frame_output, // worker
         false); // const bool workerOnNewThread
 
+// get input from video4linux2
+#ifdef READ_V4L2
+    printf("do_poser %d using V4L2\n", __LINE__);
+    frame_input = std::make_shared<V4l2Input>();
+    opWrapper.setWorker(op::WorkerType::Input, // workerType
+        frame_input, // worker
+        false); // const bool workerOnNewThread
+#endif
+
+
 // get input from a socket instead of test files
 #if defined(DO_SERVER) && !defined(SERVER_READFILES) && !defined(READ_INPUT)
+    printf("do_poser %d using server\n", __LINE__);
     opWrapper.setWorker(op::WorkerType::Input, // workerType
         frame_input, // worker
         false); // const bool workerOnNewThread
 #endif // DO_SERVER
 
 // get input from the webcam
-#if !defined(DO_SERVER) && !defined(SERVER_READFILES) && !defined(READ_INPUT)
+//#if !defined(DO_SERVER) && !defined(SERVER_READFILES) && !defined(READ_INPUT)
+#ifdef READ_WEBCAM
+    printf("do_poser %d using opencv webcam\n", __LINE__);
     op::ProducerType producerType;
-    std::string producerString;
+    op::String producerString;
     std::tie(producerType, producerString) = op::flagsToProducer(
         "", // FLAGS_image_dir
         "", // FLAGS_video
@@ -1089,7 +1570,8 @@ void do_poser()
         -1); // FLAGS_flir_camera_index
 
     const auto cameraSize = op::flagsToPoint(
-        "-1x-1", // FLAGS_camera_resolution
+//        "-1x-1", // FLAGS_camera_resolution
+        "1280x720", // FLAGS_camera_resolution
         "-1x-1");
     const op::WrapperStructInput wrapperStructInput
     {
@@ -1109,12 +1591,13 @@ void do_poser()
     };
     opWrapper.configure(wrapperStructInput);
 
-#endif // !DO_SERVER
+#endif // READ_WEBCAM
 
 // Get frames from test_input
 #if defined(SERVER_READFILES) || defined(READ_INPUT)
+    printf("do_poser %d using test input\n", __LINE__);
     op::ProducerType producerType;
-    std::string producerString;
+    op::String producerString;
     std::tie(producerType, producerString) = op::flagsToProducer(
         INPATH, // FLAGS_image_dir
         "", // FLAGS_video
@@ -1152,7 +1635,10 @@ void do_poser()
 //    const auto netInputSize = op::flagsToPoint("-1x160", "-1x160");
 // 
 // Junk laptop GTX 970M
-    const auto netInputSize = op::flagsToPoint("-1x256", "-1x256");
+//    const auto netInputSize = op::flagsToPoint("-1x256", "-1x256");
+// jetson nano
+    const auto netInputSize = op::flagsToPoint("-1x128", "-1x128");
+//    const auto netInputSize = op::flagsToPoint("-1x144", "-1x144");
 //    const auto netInputSize = op::flagsToPoint("-1x368", "-1x368");
     const auto outputSize = op::flagsToPoint("-1x-1", "-1x-1");
     const auto keypointScale = op::flagsToScaleMode(0);
@@ -1166,6 +1652,7 @@ void do_poser()
     {
         op::PoseMode::Enabled, // PoseMode
         netInputSize, // netInputSize
+        1., // FLAGS_net_resolution_dynamic
         outputSize, 
         keypointScale, // keypointScaleMode
         -1, // FLAGS_num_gpu
