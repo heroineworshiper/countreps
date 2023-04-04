@@ -1,0 +1,135 @@
+ARCH := $(shell arch)
+GUI_DIR := ../guicast
+TENSORTRT_DIR := ../tensorrt-openpose/trt_demo
+CUDA_INC := /usr/local/cuda-10.2/targets/aarch64-linux/include/
+NVCC := /usr/local/cuda-10.2/bin/nvcc
+CUDA_LIB := /usr/local/cuda/lib64/
+OPENCV_INC := /usr/include/opencv4/
+
+OBJS := \
+    Openpose.o \
+    parse/find_peaks.o \
+    parse/refine_peaks.o \
+    parse/paf_score_graph.o \
+    parse/munkres.o \
+    parse/connect_parts.o
+
+COUNTREPS_OBJS := \
+	countreps_trt.o \
+	gui.o
+
+
+TRACKER_OBJS := \
+    irlib.o \
+    tracker_trt.o \
+    trackerserver.o
+
+
+
+CUDA_OBJS := resize.o \
+    openpose/array.o \
+    openpose/errorAndLog.o \
+    openpose/matrix.o \
+    openpose/poseParameters.o \
+    openpose/bodyPartConnectorBaseC.o \
+    openpose/rectangle.o \
+    openpose/keypoint.o \
+    openpose/resize_openpose.o \
+    openpose/resizeAndMergeBase.o \
+    openpose/nmsBase.o \
+    openpose/bodyPartConnectorBase.o
+
+
+CFLAGS := \
+    -O2 \
+    -std=c++11 \
+    -I$(GUI_DIR) \
+    -I$(TENSORTRT_DIR) \
+    -I$(CUDA_INC) \
+    -Iopenpose \
+    -I$(OPENCV_INC) \
+    -I/usr/include/freetype2
+
+NVCFLAGS := \
+    -I$(OPENCV_INC)
+
+CUDA_LIBS := \
+    -lcudart \
+    -lnvinfer
+
+
+
+LFLAGS := \
+    -L$(OPENCV_DIR)/lib \
+    -L`pwd`/lib \
+	-lpthread \
+    $(GUI_DIR)/$(ARCH)/libguicast.a \
+    $(GUI_DIR)/$(ARCH)/libcmodel.a \
+    -L$(CUDA_LIB) \
+    -lX11 \
+    -lXext \
+    -lXft \
+    -lXv \
+    -lpng \
+    -lfreetype \
+    $(CUDA_LIBS) \
+    `pkg-config opencv4 --libs`
+
+
+
+CC := g++
+
+all: tracker_trt
+
+tracker_trt: $(TRACKER_OBJS) $(CUDA_OBJS)
+	$(CC) -o tracker_trt $(TRACKER_OBJS) $(CUDA_OBJS) $(LFLAGS) -ljpeg
+
+countreps_trt: $(COUNTREPS_OBJS) $(CUDA_OBJS)
+	$(CC) -o countreps_trt $(COUNTREPS_OBJS) $(CUDA_OBJS) $(LFLAGS) -ljpeg
+
+#trt_engine: trt_engine.o
+#	$(CC) -o trt_engine trt_engine.o $(LFLAGS)
+
+clean:
+	rm -f *.o openpose/*.o countreps_trt
+
+$(OBJS) $(TRACKER_OBJS) $(COUNTREPS_OBJS):
+	$(CC) $(CFLAGS) -c $< -o $*.o
+
+$(CUDA_OBJS):
+	$(NVCC) $(NVCFLAGS)	-c $< -o $*.o
+
+
+resize.o: resize.cu
+openpose/resize_openpose.o: openpose/resize_openpose.cu
+openpose/resizeAndMergeBase.o: openpose/resizeAndMergeBase.cu
+openpose/nmsBase.o: openpose/nmsBase.cu
+openpose/bodyPartConnectorBase.o: openpose/bodyPartConnectorBase.cu
+
+
+
+#trt_engine.o: trt_engine.c
+countreps_trt.o: countreps_trt.c
+tracker_trt.o: tracker_trt.c
+trackerx11.o: trackerx11.c
+trackerserver.o: trackerserver.c
+gui.o: gui.c
+irlib.o: irlib.c
+Openpose.o: Openpose.cpp
+parse/find_peaks.o: parse/find_peaks.cpp
+parse/refine_peaks.o:    parse/refine_peaks.cpp
+parse/paf_score_graph.o: parse/paf_score_graph.cpp
+parse/munkres.o:         parse/munkres.cpp
+parse/connect_parts.o:   parse/connect_parts.cpp
+openpose/array.o: openpose/array.cpp
+openpose/errorAndLog.o: openpose/errorAndLog.cpp
+openpose/matrix.o: openpose/matrix.cpp
+openpose/poseParameters.o: openpose/poseParameters.cpp
+openpose/bodyPartConnectorBaseC.o: openpose/bodyPartConnectorBaseC.cpp
+openpose/rectangle.o: openpose/rectangle.cpp
+openpose/keypoint.o: openpose/keypoint.cpp
+
+
+
+
+

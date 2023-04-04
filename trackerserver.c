@@ -38,111 +38,321 @@
 #include <sys/wait.h>
 #include <pthread.h>
 #include "tracker.h"
+#include "jpeglib.h"
+#include <setjmp.h>
 
 
 
 #ifdef USE_SERVER
 
-#define PORT0 1234
-#define PORT1 1238
-#define TOTAL_CONNECTIONS 4
+#define RECV_PORT 1234
+#define SEND_PORT 1235
 #define SOCKET_BUFSIZE 1024
-#define SERVER_NAME "Tracker"
-#define FFMPEG_STDIN "/tmp/ffmpeg_stdin"
-#define FFMPEG_STDOUT "/tmp/ffmpeg_stdout"
 
 // packet type
 #define VIJEO 0x00
 #define STATUS 0x01
+#define KEYPOINTS 0x02
+
 
 #define START_CODE0 0xff
 #define START_CODE1 0xe7
 
 
-uint8_t *server_video = 0;
-int server_output = -1;
 uint8_t prev_error_flags = 0xff;
 
-typedef struct 
-{
-	int is_writing;
-	int is_reading;
-	int fd;
-	sem_t write_lock;
-	sem_t read_lock;
-} webserver_connection_t;
-webserver_connection_t* connections[TOTAL_CONNECTIONS];
+int recv_socket = -1;
+int send_socket = -1;
+uint32_t send_addr = 0;
+sem_t data_ready;
 
-webserver_connection_t *current_connection = 0;
 
+// pointers to last sent buffers
+// when the value is <= 0, the buffer is ready to accept new data
+// when the value is > 0, it's being written
+uint8_t *keypoint_buffer2 = 0;
+int keypoint_size2 = 0;
+int current_input2 = -1;
+uint8_t status_buffer[HEADER_SIZE + 32];
+int status_size = 0;
+
+// destination for JPEG compression
+#define MAX_JPEG 0x100000
+uint8_t vijeo_buffer[MAX_JPEG];
+int vijeo_size = 0;
 pthread_mutex_t www_mutex;
 
 
+struct my_jpeg_error_mgr {
+  struct jpeg_error_mgr pub;	/* "public" fields */
+  jmp_buf setjmp_buffer;	/* for return to caller */
+};
 
+static struct my_jpeg_error_mgr my_jpeg_error;
 
-int send_packet(webserver_connection_t *connection, int type, uint8_t *data, int bytes)
+typedef struct 
 {
-    uint8_t header[8];
-    header[0] = START_CODE0;
-    header[1] = START_CODE1;
-    header[2] = type;
-    header[3] = 0;
-    header[4] = bytes & 0xff;
-    header[5] = (bytes >> 8) & 0xff;
-    header[6] = (bytes >> 16) & 0xff;
-    header[7] = (bytes >> 24) & 0xff;
+	struct jpeg_destination_mgr pub; /* public fields */
+
+	JOCTET *buffer;		/* Pointer to buffer */
+} my_destination_mgr;
+
+
+METHODDEF(void) init_destination(j_compress_ptr cinfo)
+{
+  	my_destination_mgr *dest = (my_destination_mgr*)cinfo->dest;
+
+/* Set the pointer to the preallocated buffer */
+    vijeo_size = 0;
+  	dest->buffer = vijeo_buffer + HEADER_SIZE;
+  	dest->pub.next_output_byte = dest->buffer;
+  	dest->pub.free_in_buffer = MAX_JPEG - HEADER_SIZE;
+}
+
+
+/*
+ * Terminate destination --- called by jpeg_finish_compress
+ * after all data has been written.  Usually needs to flush buffer.
+ *
+ * NB: *not* called by jpeg_abort or jpeg_destroy; surrounding
+ * application must deal with any cleanup that should happen even
+ * for error exit.
+ */
+METHODDEF(void) term_destination(j_compress_ptr cinfo)
+{
+/* Just get the length */
+	my_destination_mgr *dest = (my_destination_mgr*)cinfo->dest;
+	vijeo_size = MAX_JPEG - HEADER_SIZE - dest->pub.free_in_buffer;
+}
+
+/*
+ * Empty the output buffer --- called whenever buffer fills up.
+ *
+ * In typical applications, this should write the entire output buffer
+ * (ignoring the current state of next_output_byte & free_in_buffer),
+ * reset the pointer & count to the start of the buffer, and return TRUE
+ * indicating that the buffer has been dumped.
+ *
+ * In applications that need to be able to suspend compression due to output
+ * overrun, a FALSE return indicates that the buffer cannot be emptied now.
+ * In this situation, the compressor will return to its caller (possibly with
+ * an indication that it has not accepted all the supplied scanlines).  The
+ * application should resume compression after it has made more room in the
+ * output buffer.  Note that there are substantial restrictions on the use of
+ * suspension --- see the documentation.
+ *
+ * When suspending, the compressor will back up to a convenient restart point
+ * (typically the start of the current MCU). next_output_byte & free_in_buffer
+ * indicate where the restart point will be if the current call returns FALSE.
+ * Data beyond this point will be regenerated after resumption, so do not
+ * write it out when emptying the buffer externally.
+ */
+
+METHODDEF(boolean) empty_vijeo_buffer(j_compress_ptr cinfo)
+{
+/* Allocate a bigger buffer. */
+	my_destination_mgr *dest = (my_destination_mgr*)cinfo->dest;
+
+//printf("empty_vijeo_buffer %d %d\n", __LINE__, dest->pub.free_in_buffer);
+	dest->buffer = vijeo_buffer + HEADER_SIZE;
+	dest->pub.next_output_byte = dest->buffer;
+	dest->pub.free_in_buffer = MAX_JPEG - HEADER_SIZE;
+	return TRUE;
+}
+
+
+
+void compress_jpeg()
+{
+	struct jpeg_compress_struct cinfo;
+	cinfo.err = jpeg_std_error(&(my_jpeg_error.pub));
+    jpeg_create_compress(&cinfo);
+    cinfo.image_width = CAM_W;
+    cinfo.image_height = CAM_H;
+    cinfo.input_components = 3;
+	cinfo.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, 80, 0);
+    cinfo.dct_method = JDCT_IFAST;
+    cinfo.raw_data_in = TRUE;
+    my_destination_mgr *dest;
+    if(cinfo.dest == NULL) 
+	{
+/* first time for this JPEG object? */
+      	cinfo.dest = (struct jpeg_destination_mgr *)
+    		(*cinfo.mem->alloc_small)((j_common_ptr)&cinfo, 
+				JPOOL_PERMANENT,
+				sizeof(my_destination_mgr));
+	}
+
+	dest = (my_destination_mgr*)cinfo.dest;
+	dest->pub.init_destination = init_destination;
+	dest->pub.empty_output_buffer = empty_vijeo_buffer;
+	dest->pub.term_destination = term_destination;
+
+    int mcu_h = (int)(CAM_H / 16) * 16;
+    if(mcu_h < CAM_H) mcu_h += 16;
+
+    unsigned char **mcu_rows[3];
+    mcu_rows[0] = new uint8_t*[mcu_h];
+    mcu_rows[1] = new uint8_t*[mcu_h / 2];
+    mcu_rows[2] = new uint8_t*[mcu_h / 2];
+
+// pack Y with height scaling
+    for(int i = 0; i < CAM_H; i++)
+    {
+        uint8_t *src = hdmi_rows[current_input2][i * HDMI_H / CAM_H];
+        uint8_t *dst;
+        mcu_rows[0][i] = dst = new uint8_t[CAM_W];
+        for(int j = 0; j < CAM_W; j++)
+        {
+            *dst++ = src[0];
+            src += 2;
+        }
+    }
+
+// pad Y
+    for(int i = CAM_H; i < mcu_h; i++)
+    {
+        uint8_t *dst;
+        mcu_rows[0][i] = dst = new uint8_t[CAM_W];
+        memset(dst, 0, CAM_W);
+    }
+
+// pack UV with height scaling
+    for(int i = 0; i < CAM_H / 2; i++)
+    {
+        uint8_t *src = hdmi_rows[current_input2][i * 2 * HDMI_H / CAM_H];
+        uint8_t *dst_u;
+        uint8_t *dst_v;
+        mcu_rows[1][i] = dst_u = new uint8_t[CAM_W / 2];
+        mcu_rows[2][i] = dst_v = new uint8_t[CAM_W / 2];
+        for(int j = 0; j < CAM_W / 2; j++)
+        {
+            *dst_u++ = src[1];
+            *dst_v++ = src[3];
+            src += 4;
+        }
+    }
+
+// pad UV
+    for(int i = CAM_H / 2; i < mcu_h / 2; i++)
+    {
+        uint8_t *dst_u;
+        uint8_t *dst_v;
+        mcu_rows[1][i] = dst_u = new uint8_t[CAM_W / 2];
+        mcu_rows[2][i] = dst_v = new uint8_t[CAM_W / 2];
+        memset(dst_u, 0, CAM_W / 2);
+        memset(dst_v, 0, CAM_W / 2);
+    }
+
+    jpeg_start_compress(&cinfo, TRUE);
+    while(cinfo.next_scanline < cinfo.image_height)
+	{
+        uint8_t **mcu_rows2[3];
+        mcu_rows2[0] = new uint8_t*[16];
+        mcu_rows2[1] = new uint8_t*[8];
+        mcu_rows2[2] = new uint8_t*[8];
+        for(int i = 0; i < 16; i++)
+            mcu_rows2[0][i] = mcu_rows[0][cinfo.next_scanline + i];
+        for(int i = 0; i < 8; i++)
+        {
+            mcu_rows2[1][i] = mcu_rows[1][cinfo.next_scanline / 2 + i];
+            mcu_rows2[2][i] = mcu_rows[2][cinfo.next_scanline / 2 + i];
+        }
+        jpeg_write_raw_data(&cinfo,
+            mcu_rows2,
+            16);
+        delete [] mcu_rows2[0];
+        delete [] mcu_rows2[1];
+        delete [] mcu_rows2[2];
+    }
+    jpeg_finish_compress(&cinfo);
+    jpeg_destroy_compress(&cinfo);
+
+    for(int i = 0; i < mcu_h; i++)
+    {
+        delete [] mcu_rows[0][i];
+    }
+    for(int i = 0; i < mcu_h / 2; i++)
+    {
+        delete [] mcu_rows[1][i];
+        delete [] mcu_rows[2][i];
+    }
+    delete [] mcu_rows[0];
+    delete [] mcu_rows[1];
+    delete [] mcu_rows[2];
+}
+
+
+
+
+int send_packet(int type, 
+    uint8_t *data, // pointer to start of header
+    int bytes) // size not including header
+{
+    int size = HEADER_SIZE + bytes;
+
+    data[0] = START_CODE0;
+    data[1] = START_CODE1;
+    data[2] = type;
+    data[3] = 0;
+    data[4] = bytes & 0xff;
+    data[5] = (bytes >> 8) & 0xff;
+    data[6] = (bytes >> 16) & 0xff;
+    data[7] = (bytes >> 24) & 0xff;
 
     int result = -1;
     pthread_mutex_lock(&www_mutex);
-    if(connection->fd >= 0)
-    {
-        result = write(connection->fd, header, 8);
-        result = write(connection->fd, data, bytes);
-    }
+    result = write(send_socket, data, size);
     pthread_mutex_unlock(&www_mutex);
     return result;
 }
 
-void send_status(webserver_connection_t *connection)
+void send_status()
 {
-    uint8_t buffer[32];
-    buffer[0] = current_operation;
-    buffer[1] = 0;
+    int offset = HEADER_SIZE;
+    status_buffer[offset++] = current_operation;
+    status_buffer[offset++] = 0;
 
     int tmp = (int)pan;
-    buffer[2] = tmp & 0xff;
-    buffer[3] = (tmp >> 8) & 0xff;
-    buffer[4] = (tmp >> 16) & 0xff;
-    buffer[5] = (tmp >> 24) & 0xff;
+    status_buffer[offset++] = tmp & 0xff;
+    status_buffer[offset++] = (tmp >> 8) & 0xff;
+    status_buffer[offset++] = (tmp >> 16) & 0xff;
+    status_buffer[offset++] = (tmp >> 24) & 0xff;
 
     tmp = (int)tilt;
-    buffer[6] = tmp & 0xff;
-    buffer[7] = (tmp >> 8) & 0xff;
-    buffer[8] = (tmp >> 16) & 0xff;
-    buffer[9] = (tmp >> 24) & 0xff;
+    status_buffer[offset++] = tmp & 0xff;
+    status_buffer[offset++] = (tmp >> 8) & 0xff;
+    status_buffer[offset++] = (tmp >> 16) & 0xff;
+    status_buffer[offset++] = (tmp >> 24) & 0xff;
 
     tmp = (int)start_pan;
-    buffer[10] = tmp & 0xff;
-    buffer[11] = (tmp >> 8) & 0xff;
-    buffer[12] = (tmp >> 16) & 0xff;
-    buffer[13] = (tmp >> 24) & 0xff;
+    status_buffer[offset++] = tmp & 0xff;
+    status_buffer[offset++] = (tmp >> 8) & 0xff;
+    status_buffer[offset++] = (tmp >> 16) & 0xff;
+    status_buffer[offset++] = (tmp >> 24) & 0xff;
 
     tmp = (int)start_tilt;
-    buffer[14] = tmp & 0xff;
-    buffer[15] = (tmp >> 8) & 0xff;
-    buffer[16] = (tmp >> 16) & 0xff;
-    buffer[17] = (tmp >> 24) & 0xff;
+    status_buffer[offset++] = tmp & 0xff;
+    status_buffer[offset++] = (tmp >> 8) & 0xff;
+    status_buffer[offset++] = (tmp >> 16) & 0xff;
+    status_buffer[offset++] = (tmp >> 24) & 0xff;
 
-    buffer[18] = pan_sign;
-    buffer[19] = tilt_sign;
-    buffer[20] = lens;
-    buffer[21] = landscape;
-    buffer[22] = error_flags;
+    status_buffer[offset++] = pan_sign;
+    status_buffer[offset++] = tilt_sign;
+    status_buffer[offset++] = lens;
+    status_buffer[offset++] = landscape;
+    status_buffer[offset++] = error_flags;
 
     prev_error_flags = error_flags;
 
+    status_size = offset - HEADER_SIZE;
+// wake up the writer
+    sem_post(&data_ready);
+            
 //    printf("send_status %d error_flags=%d\n", __LINE__, error_flags);
-    send_packet(connection, STATUS, buffer, 23);
+//    joinBodyParts(connection, STATUS, buffer, 23);
 }
 
 void send_error()
@@ -154,474 +364,280 @@ void send_error()
 //         prev_error_flags);
     if(error_flags != prev_error_flags)
     {
-        if(current_connection)
-	    {
-		    if(current_connection->is_writing &&
-                current_connection->is_reading)
-		    {
-                //printf("send_error %d\n", __LINE__);
-			    send_status(current_connection);
-		    }
-	    }
+		send_status();
     }
     pthread_mutex_unlock(&www_mutex);
 }
 
 
-void send_vijeo(webserver_connection_t *connection)
+void send_vijeo(int current_input)
 {
-//#define FFMPEG_COMMAND "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 30 -s:v %dx%d -i - -vf scale=%d:%d -f h264 -c:v h264 -bufsize 0 -b:v 1000k -maxrate 2M -flush_packets 1 -an - > %s"
-//#define FFMPEG_COMMAND "ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 30 -s:v %dx%d -i - -vf scale=%d:%d -f hevc -bufsize 0 -b:v 1000k -maxrate 2M -flush_packets 1 -an - > %s"
-//#define FFMPEG_COMMAND "cat %s | ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 30 -s:v %dx%d -i - -vf scale=%d:%d -f mjpeg -pix_fmt yuvj420p -bufsize 0 -b:v 5M -flush_packets 1 -an - > %s"
-#define FFMPEG_COMMAND "cat %s | ffmpeg -y -f rawvideo -y -pix_fmt bgr24 -r 30 -s:v %dx%d -i - -f mjpeg -pix_fmt yuvj420p -bufsize 0 -b:v 5M -flush_packets 1 -an - > %s"
-
-    char string[TEXTLEN];
-    sprintf(string, 
-        FFMPEG_COMMAND, 
-        FFMPEG_STDIN,
-        SERVER_W,
-        SERVER_H,
-        FFMPEG_STDOUT);
-    printf("send_vijeo %d: running %s\n",
-        __LINE__,
-        string);
-
-
     pthread_mutex_lock(&www_mutex);
-
-    int ffmpeg_pid = fork();
-    if(!ffmpeg_pid)
-    {
-        execl("/bin/sh", "sh", "-c", string, 0);
-        exit(0);
-    }
-
-// must be frame aligned so must be reopened for every stream
-    FILE *server_output_fd = fopen(FFMPEG_STDIN, "w");
-
-
-    if(!server_output_fd)
-    {
-        printf("send_vijeo %d: failed to open %s\n",
-            __LINE__,
-            FFMPEG_STDIN);
-        pthread_mutex_unlock(&www_mutex);
-        return;
-    }
-
-    FILE *ffmpeg_read = fopen(FFMPEG_STDOUT, "r");
-    if(!ffmpeg_read)
-    {
-        printf("send_vijeo %d: failed to read ffmpeg output\n",
-            __LINE__);
-        fclose(server_output_fd);
-        server_output = -1;
-        pthread_mutex_unlock(&www_mutex);
-        return;
-    }
-    server_output = fileno(server_output_fd);
-
-    pthread_mutex_unlock(&www_mutex);
-
-
-    unsigned char buffer[SOCKET_BUFSIZE];
-    int total = 0;
-    int done = 0;
-    while(!done)
-    {
-// wait for either an exit or data to read
-        fd_set rfds;
-		FD_ZERO(&rfds);
-		FD_SET(fileno(ffmpeg_read), &rfds);
-		struct timeval timeout;
-		timeout.tv_sec = 1;
-		timeout.tv_usec = 0;
-		int result = select(fileno(ffmpeg_read) + 1, 
-			&rfds, 
-			0, 
-			0, 
-			&timeout);
-
-// reader exited
-        if(!connection->is_reading)
-        {
-            printf("send_vijeo %d\n", __LINE__);
-            break;
-        }
-
-// ffmpeg wrote data
-        if((FD_ISSET(fileno(ffmpeg_read), &rfds)))
-        {
-            int bytes_read = fread(buffer, 1, SOCKET_BUFSIZE, ffmpeg_read);
-            int bytes_written = 0;
-
-            if(bytes_read <= 0)
-            {
-                printf("send_vijeo %d: ffmpeg crashed\n",
-                    __LINE__);
-                done = 1;
-            }
-            else
-            {
-                bytes_written = send_packet(connection, VIJEO, buffer, bytes_read);
-                if(bytes_written < bytes_read)
-                {
-                    printf("send_vijeo %d: connection closed\n",
-                        __LINE__);
-                    done = 1;
-                }
-                total += bytes_written;
-            }
-        }
-
-// printf("send_vijeo %d: bytes_read=%d bytes_written=%d\n",
-// __LINE__,
-// bytes_read,
-// bytes_written);
-// printf("send_vijeo %d: total=%d\n",
-// __LINE__,
-// total);
-    }
-
-    pthread_mutex_lock(&www_mutex);
-    kill(ffmpeg_pid, SIGKILL);
-    int status;
-    waitpid(ffmpeg_pid, &status, 0);
-    fclose(server_output_fd);
-    fclose(ffmpeg_read);
-    server_output = -1;
+    current_input2 = current_input;
+    sem_post(&data_ready);
     pthread_mutex_unlock(&www_mutex);
 }
 
+
+void send_keypoints(uint8_t *buffer, int size)
+{
+    pthread_mutex_lock(&www_mutex);
+    keypoint_buffer2 = buffer;
+    keypoint_size2 = size;
+    sem_post(&data_ready);
+    pthread_mutex_unlock(&www_mutex);
+}
 
 
 void* web_server_reader(void *ptr)
 {
-	webserver_connection_t *connection = (webserver_connection_t*)ptr;
 	unsigned char buffer[SOCKET_BUFSIZE];
 	while(1)
 	{
-// wait for next connection
-		sem_wait(&connection->read_lock);
-		printf("web_server_reader %d: client opened\n", __LINE__);
-
-        while(1)
+//        int bytes_read = read(recv_socket, buffer, SOCKET_BUFSIZE);
+        struct sockaddr_in peer_addr;
+        socklen_t peer_addr_len = sizeof(struct sockaddr_in);
+//printf("web_server_reader %d\n", __LINE__);
+        int bytes_read = recvfrom(recv_socket,
+            buffer, 
+            SOCKET_BUFSIZE, 
+            0,
+            (struct sockaddr *) &peer_addr, 
+            &peer_addr_len);
+//printf("web_server_reader %d\n", __LINE__);
+        if(send_addr != peer_addr.sin_addr.s_addr)
         {
-            int bytes_read = read(connection->fd, buffer, SOCKET_BUFSIZE);
-            printf("web_server_reader %d bytes_read=%d\n", __LINE__, bytes_read);
-            if(bytes_read <= 0)
-            {
-                break;
-            }
+            printf("web_server_reader %d: new connection\n", __LINE__);
+            printf("web_server_reader %d peer_addr=%08x\n", 
+                __LINE__, 
+                peer_addr.sin_addr.s_addr);
+            if(send_socket >= 0)
+                close(send_socket);
+            send_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+            send_addr = peer_addr.sin_addr.s_addr;
+            peer_addr.sin_port = htons((unsigned short)SEND_PORT);
+            connect(send_socket, 
+		        (struct sockaddr*)&peer_addr, 
+		        peer_addr_len);
+        }
 
-            int i;
-            for(i = 0; i < bytes_read; i++)
-            {
-                int c = buffer[i];
-                printf("web_server_reader %d '%c'\n", __LINE__, buffer[i]);
-                
+        int i;
+        for(i = 0; i < bytes_read; i++)
+        {
+            int c = buffer[i];
+            printf("web_server_reader %d '%c'\n", __LINE__, buffer[i]);
+
 // do everything GUI::keypress_event does
-                
-                if(current_operation == STARTUP)
+            if(c == '*')
+            {
+                send_status();
+            }
+            else
+            if(current_operation == STARTUP)
+            {
+                if(c == ' ')
                 {
-                    if(c == ' ')
-                    {
-                        current_operation = CONFIGURING;
+                    current_operation = CONFIGURING;
 
-                        send_status(connection);
+                    send_status();
 
-                        do_startup();
-                    }
+                    do_startup();
                 }
-                else
-                if(current_operation == CONFIGURING)
+            }
+            else
+            if(current_operation == CONFIGURING)
+            {
+                int need_write_servos = 0;
+
+                switch(c)
                 {
-                    int need_write_servos = 0;
-                    
-                    switch(c)
-                    {
-                        case 'q':
-                            stop_servos();
-                            ::save_defaults();
-                            current_operation = STARTUP;
-                            break;
+                    case 'q':
+                        stop_servos();
+                        ::save_defaults();
+                        current_operation = STARTUP;
+                        break;
 
-                        case '\n':
-                            ::save_defaults();
-                            current_operation = TRACKING;
-                            break;
-                        
-                        case 'w':
-                            tilt += lenses[lens].tilt_step * tilt_sign;
-                            start_pan = pan;
-                            start_tilt = tilt;
-                            need_write_servos = 1;
-                            break;
+                    case '\n':
+                        ::save_defaults();
+                        current_operation = TRACKING;
+                        break;
 
-                        case 's':
-                            tilt -= lenses[lens].tilt_step * tilt_sign;
-                            start_pan = pan;
-                            start_tilt = tilt;
-                            need_write_servos = 1;
-                            break;
+                    case 'w':
+                        tilt += lenses[lens].tilt_step * tilt_sign;
+                        start_pan = pan;
+                        start_tilt = tilt;
+                        need_write_servos = 1;
+                        break;
 
-                        case 'a':
-                            pan -= lenses[lens].pan_step * pan_sign;
-                            start_pan = pan;
-                            start_tilt = tilt;
-                            need_write_servos = 1;
-                            break;
+                    case 's':
+                        tilt -= lenses[lens].tilt_step * tilt_sign;
+                        start_pan = pan;
+                        start_tilt = tilt;
+                        need_write_servos = 1;
+                        break;
 
-                        case 'd':
-                            pan += lenses[lens].pan_step * pan_sign;
-                            start_pan = pan;
-                            start_tilt = tilt;
-                            need_write_servos = 1;
-                            break;
+                    case 'a':
+                        pan -= lenses[lens].pan_step * pan_sign;
+                        start_pan = pan;
+                        start_tilt = tilt;
+                        need_write_servos = 1;
+                        break;
 
-                        case 'c':
-                            pan = start_pan;
-                            tilt = start_tilt;
-                            need_write_servos = 1;
-                            break;
+                    case 'd':
+                        pan += lenses[lens].pan_step * pan_sign;
+                        start_pan = pan;
+                        start_tilt = tilt;
+                        need_write_servos = 1;
+                        break;
 
-                        case 't':
-                            tilt_sign *= -1;
-                            ::save_defaults();
-                            break;
+                    case 'c':
+                        pan = start_pan;
+                        tilt = start_tilt;
+                        need_write_servos = 1;
+                        break;
 
-                        case 'p':
-                            pan_sign *= -1;
-                            ::save_defaults();
-                            break;
+                    case 't':
+                        tilt_sign *= -1;
+                        ::save_defaults();
+                        break;
+
+                    case 'p':
+                        pan_sign *= -1;
+                        ::save_defaults();
+                        break;
 
 //                         case 'r':
 //                             landscape = !landscape;
 //                             ::save_defaults();
 //                             break;
 
-                        case 'r':
-                            if(!landscape)
-                            {
-                                landscape = 1;
-                                ::save_defaults();
-                            }
-                            break;
-                            
-                        case 'R':
-                            if(landscape)
-                            {
-                                landscape = 0;
-                                ::save_defaults();
-                            }
-                            break;
-
-                        case 'l':
-                            lens++;
-                            if(lens >= TOTAL_LENSES)
-                            {
-                                lens = 0;
-                            }
+                    case 'r':
+                        if(!landscape)
+                        {
+                            landscape = 1;
                             ::save_defaults();
-                            break;
-                    }
-                    
-                    if(need_write_servos)
-                    {
-                        write_servos(1);
-                    }
-                    send_status(connection);
-                }
-                else
-                if(current_operation == TRACKING)
-                {
-                    switch(c)
-                    {
-                        case 'Q':
-                            stop_servos();
-                            current_operation = STARTUP;
-                            send_status(connection);
-                            break;
+                        }
+                        break;
 
-                        case 'b':
-                            current_operation = CONFIGURING;
-                            send_status(connection);
-                            break;
-                    }
+                    case 'R':
+                        if(landscape)
+                        {
+                            landscape = 0;
+                            ::save_defaults();
+                        }
+                        break;
+
+                    case 'l':
+                        lens++;
+                        if(lens >= TOTAL_LENSES)
+                        {
+                            lens = 0;
+                        }
+                        ::save_defaults();
+                        break;
                 }
-                
+
+                if(need_write_servos)
+                {
+                    write_servos(1);
+                }
+                send_status();
+            }
+            else
+            if(current_operation == TRACKING)
+            {
+                switch(c)
+                {
+                    case 'Q':
+                        stop_servos();
+                        current_operation = STARTUP;
+                        send_status();
+                        break;
+
+                    case 'b':
+                        current_operation = CONFIGURING;
+                        send_status();
+                        break;
+                }
             }
         }
-
-		printf("web_server_reader %d: client closed\n", __LINE__);
-        pthread_mutex_lock(&www_mutex);
-// TODO: must interrupt the fread in the writer if video isn't streaming
-		connection->is_reading = 0;
-        pthread_mutex_unlock(&www_mutex);
     }
 }
 
 
 void* web_server_writer(void *ptr)
 {
-	webserver_connection_t *connection = (webserver_connection_t*)ptr;
 	unsigned char buffer[SOCKET_BUFSIZE];
 	int i;
 
 	while(1)
 	{
-// wait for next connection
-		sem_wait(&connection->write_lock);
-		printf("web_server_writer %d: client opened\n", __LINE__);
-
-        send_status(connection);
-        send_vijeo(connection);
+// wait for data to write
+        sem_wait(&data_ready);
 
 
-		printf("web_server_writer %d: client closed\n", __LINE__);
-        pthread_mutex_lock(&www_mutex);
-		close(connection->fd);
-        connection->fd = -1;
-		connection->is_writing = 0;
-        pthread_mutex_unlock(&www_mutex);
+// no client
+        if(send_socket < 0)
+            continue;
+
+        if(status_size)
+        {
+            send_packet(STATUS, status_buffer, status_size);
+            status_size = 0;
+        }
+
+        if(keypoint_size2)
+        {
+            send_packet(KEYPOINTS, keypoint_buffer2, keypoint_size2);
+            keypoint_size2 = 0;
+        }
+
+        if(current_input2 >= 0)
+        {
+// compress it
+            compress_jpeg();
+            send_packet(VIJEO, vijeo_buffer, vijeo_size);
+            current_input2 = -1;
+        }
 	}
 }
 
-webserver_connection_t* new_connection()
-{
-	webserver_connection_t *result = (webserver_connection_t*)calloc(1, sizeof(webserver_connection_t));
-
-	sem_init(&result->write_lock, 0, 0);
-	sem_init(&result->read_lock, 0, 0);
-    result->fd = -1;
-
-	pthread_attr_t  attr;
-	pthread_attr_init(&attr);
-	pthread_t tid;
-	pthread_create(&tid, 
-		&attr, 
-		web_server_writer, 
-		result);
-	pthread_create(&tid, 
-		&attr, 
-		web_server_reader, 
-		result);
-	return result;
-}
-
-void start_connection(webserver_connection_t *connection, int fd)
-{
-    pthread_mutex_lock(&www_mutex);
-	connection->is_writing = 1;
-	connection->is_reading = 1;
-	connection->fd = fd;
-    current_connection = connection;
-    pthread_mutex_unlock(&www_mutex);
-
-
-	sem_post(&connection->write_lock);
-	sem_post(&connection->read_lock);
-}
-
-
-void* web_server(void *ptr)
-{
-	int i;
-	for(i = 0; i < TOTAL_CONNECTIONS; i++)
-	{
-		connections[i] = new_connection();
-	}
-	
-	int fd = socket(AF_INET, SOCK_STREAM, 0);
-	
-	int reuseon = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuseon, sizeof(reuseon));
-    struct sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    
-    for(int port = PORT0; port < PORT1; port++)
-    {
-        addr.sin_port = htons(port);
-
-        int result = bind(fd, (struct sockaddr *) &addr, sizeof(addr));
-	    if(result)
-	    {
-		    printf("web_server %d: bind %d failed\n", __LINE__, port);
-		    continue;
-	    }
-        
-        printf("web_server %d: bound port %d\n", __LINE__, port);
-        break;
-    }
-	
-	while(1)
-	{
-		listen(fd, 256);
-		struct sockaddr_in clientname;
-		socklen_t size = sizeof(clientname);
-		int connection_fd = accept(fd,
-                			(struct sockaddr*)&clientname, 
-							&size);
-        int flag = 1; 
-        setsockopt(connection_fd, 
-            IPPROTO_TCP, 
-            TCP_NODELAY, 
-            (char *)&flag, 
-            sizeof(int));
-
-//printf("web_server %d: accept\n", __LINE__);
-
-		int got_it = 0;
-		for(i = 0; i < TOTAL_CONNECTIONS; i++)
-		{
-			if(!connections[i]->is_writing &&
-                !connections[i]->is_reading)
-			{
-				start_connection(connections[i], connection_fd);
-				got_it = 1;
-				break;
-			}
-		}
-		
-		if(!got_it)
-		{
-			printf("web_server %d: out of connections\n", __LINE__);
-		}
-	}
-}
 
 
 
 void init_server()
 {
-    printf("init_server %d making %s %s\n", __LINE__, FFMPEG_STDIN, FFMPEG_STDOUT);
-    int result = mkfifo(FFMPEG_STDIN, 0777);
-    if(result != 0)
-    {
-        printf("init_server %d %s: %s\n", __LINE__, FFMPEG_STDIN, strerror(errno));
-    }
-    result = mkfifo(FFMPEG_STDOUT, 0777);
-    if(result != 0)
-    {
-        printf("init_server %d %s: %s\n", __LINE__, FFMPEG_STDOUT, strerror(errno));
-    }
+	recv_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-    server_video = (uint8_t*)malloc(SERVER_W * SERVER_H * 3);
+	int reuseon = 1;
+    setsockopt(recv_socket, SOL_SOCKET, SO_REUSEADDR, &reuseon, sizeof(reuseon));
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(RECV_PORT);
 
-	pthread_mutexattr_t attr2;
-	pthread_mutexattr_init(&attr2);
-    pthread_mutexattr_settype(&attr2, PTHREAD_MUTEX_RECURSIVE);
-	pthread_mutex_init(&www_mutex, &attr2);
-    
-    pthread_t tid;
-	pthread_attr_t attr;
+    int result = bind(recv_socket, (struct sockaddr *) &addr, sizeof(addr));
+	if(result)
+	{
+		printf("init_server %d: bind port %d failed\n", __LINE__, RECV_PORT);
+	}
+
+
+
+	sem_init(&data_ready, 0, 0);
+
+	pthread_attr_t  attr;
 	pthread_attr_init(&attr);
-   	pthread_create(&tid, 
+	pthread_t tid;
+
+	pthread_create(&tid, 
 		&attr, 
-		web_server, 
+		web_server_writer, 
 		0);
- 
+	pthread_create(&tid, 
+		&attr, 
+		web_server_reader, 
+		0);
 }
 
 

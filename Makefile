@@ -10,7 +10,7 @@ CFLAGS := \
         -Llib \
         -lopenpose \
 	-lpthread \
-        `pkg-config opencv --libs`
+	`pkg-config opencv --libs`
 
 CC := clang++
 
@@ -21,32 +21,39 @@ else # Mac
 
 
 OPENPOSE_DIR := /root/openpose
-OPENCV_DIR := /root/opencv-3.4.3/build
-GUI_DIR := /root/hvirtual/guicast
+#OPENCV_DIR := /root/opencv-3.4.3/build
+OPENCV_INC := /usr/include/opencv4/
+#GUI_DIR := /root/hvirtual/guicast
+GUI_DIR := /root/guicast
 
 CFLAGS := \
 	-g \
         -O2 \
         -std=c++11 \
 	-I$(OPENPOSE_DIR)/include \
-	-I$(OPENCV_DIR)/include \
+        -I$(OPENCV_INC) \
         -I$(GUI_DIR) \
         -I/usr/include/freetype2
+
+#	-I$(OPENCV_DIR)/include \
 
 LFLAGS := \
         -L$(OPENCV_DIR)/lib \
         -L`pwd`/lib \
         -L$(OPENPOSE_DIR)/build/src/openpose/ \
         -lopenpose \
-        `PKG_CONFIG_PATH=$(OPENCV_DIR)/lib/pkgconfig/ pkg-config opencv --libs` \
 	-lpthread \
         $(GUI_DIR)/$(ARCH)/libguicast.a \
+        $(GUI_DIR)/$(ARCH)/libcmodel.a \
         -lX11 \
         -lXext \
         -lXft \
         -lXv \
         -lpng \
-        -lfreetype
+        -lfreetype \
+        `pkg-config opencv4 --libs`
+       
+#        `PKG_CONFIG_PATH=$(OPENCV_DIR)/lib/pkgconfig/ pkg-config opencv --libs` \
         
 CC := g++
 

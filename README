@@ -82,6 +82,21 @@ but don't work.
 
 
 --------------------------------------------------------------------------------
+Convert openpose body25 to onnx format:
+Change the input dimensions in the prototxt file to the desired dimensions.
+
+python3 -m caffe2onnx.convert --prototxt openpose/models/pose/body_25/pose_deploy.prototxt  --caffemodel openpose/models/pose/body_25/pose_iter_584000.caffemodel --onnx body25.onnx
+
+Fix broadcast operators in onnx version:
+time python3 fixonnx.py
+
+Convert to a tensorrt engine:
+/usr/src/tensorrt/bin/trtexec --onnx=body25_fixed.onnx --fp16 --saveEngine=body25.engine
+
+
+
+
+--------------------------------------------------------------------------------
 
 Compiling countreps is a matter of
 
