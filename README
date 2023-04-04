@@ -1,9 +1,33 @@
 What you'll find here:
 
 countreps: rep counter using openpose
-tracker: camera tracker using openpose
+tracker: camera tracker using openpose & CAFFE/FP32
 
-comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack
+Tracker: the android interface for the tracker
+
+tracker.h
+trackerserver.c
+tracker_trt.c: camera tracker using openpose & TENSORRT/FP16.
+    This version gives useful framerates on a jetson nano.
+    This requires the body25_*.engine files from
+    https://drive.google.com/file/d/1sFKhUgDjm0c-Dv7PBAPgatd569N6yF6p/view?usp=sharing
+    https://drive.google.com/file/d/1WnMKvONACR5N7q81nwyrE0Nje4v_iiZj/view?usp=sharing
+
+    Build the FP16 camera tracker with make -f Makefile.trt
+    Run it with ./tracker_trt
+
+
+comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack.  
+    It was envisioned as controlling the tracker but is not currently used.
+
+
+servos.pcb: USB to PWM circuit board using a PIC
+
+servos.X: USB to PWM firmware
+    Building servos.X requires mplab.
+    servos runs on a PIC
+
+servos.FCStd: enclosure for servo board
 
 
 enclosure4.FCStd: obsolete enclosure for a jetson nano terminal
@@ -38,7 +62,9 @@ enclosure4.FCStd: obsolete enclosure for a jetson nano terminal
 
 knob.FCStd: bits for mounting a camera on a pan/tilt head
 
+shroud.FCStd: shroud for the gears on a servocity pan/tilt head
 tripod.FCStd: adapt pan/tilt head to 3/8" tripod bolt
+
 
 
 --------------------------------------------------------------------------------
@@ -125,6 +151,10 @@ Compiling countreps is a matter of
 
 make countreps
 
+# build the atmega servo controller
+# must be programmed with instructions in servos.c
+make servos
+
 
 countreps.c: The rep counter.
 countreps.sh: Runs the rep counter.
@@ -133,30 +163,18 @@ countreps.sh: Runs the rep counter.
 Compiling tracker is a matter of
 
 make tracker
-make servos
-
-servos.pcb: USB to PWM circuit board
-
-servos.X: USB to PWM firmware
-    Building servos.X requires mplab.
-    servos runs on an atmega & must be programmed with instructions in servos.c
-
-servos.FCStd: enclosure for servo board
 
 
 tracker.c
-tracker.h
 trackerx11.c
-trackerserver.c:
     The back end for the tracking.
     USE_SERVER in tracker.h switches the tracker from a standalone GUI to a phone GUI
 
-tracker.sh: Runs the tracker
+tracker.sh: Runs the FP32 tracker
 
 
 
 
-Tracker: the android interface for the tracker
 
 ffmpeg-kit: ffmpeg for android must be built for the tracker
     Install the android ndk from https://developer.android.com/ndk/downloads
