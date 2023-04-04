@@ -25,12 +25,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.VideoView;
 
-import com.arthenica.ffmpegkit.ExecuteCallback;
-import com.arthenica.ffmpegkit.FFmpegKitConfig;
-import com.arthenica.ffmpegkit.FFmpegSession;
-import com.arthenica.ffmpegkit.Session;
-import com.arthenica.ffmpegkit.FFmpegKit;
-
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -57,27 +51,94 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
 
     private FragmentFirstBinding binding;
     SurfaceView video;
-    ByteBuffer[] frameBuffer = new ByteBuffer[2];
-    int currentFrameBuffer = 0;
     Bitmap videoBitmap;
+    Canvas videoCanvas;
     ClientThread client;
+
+// keypoints for the next frame
+    static int animals = 0;
+    static final int MAX_ANIMALS = 2;
+    static final int BODY_PARTS = 25;
+// input coordinates
+    static int[] keypoints = new int[MAX_ANIMALS * BODY_PARTS * 2];
+// screen coordinates
+    static int[] keypoint_cache = new int[MAX_ANIMALS * BODY_PARTS * 2];
+
+// the body parts as defined in
+// src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
+    static final int MODEL_NOSE = 0;
+    static final int MODEL_NECK = 1;
+    static final int MODEL_BUTT = 8;
+    static final int MODEL_HIP1 = 12;
+    static final int MODEL_HIP2 = 9;
+    static final int MODEL_KNEE1 = 13;
+    static final int MODEL_KNEE2 = 10;
+    static final int MODEL_ELBOW1 = 6;
+    static final int MODEL_ELBOW2 = 3;
+    static final int MODEL_SHOULDER1 = 5;
+    static final int MODEL_SHOULDER2 = 2;
+    static final int MODEL_ANKLE1 = 14;
+    static final int MODEL_ANKLE2 = 11;
+    static final int MODEL_WRIST1 = 7;
+    static final int MODEL_WRIST2 = 4;
+    static final int MODEL_EYE2 = 15;
+    static final int MODEL_EYE1 = 16;
+    static final int MODEL_EAR2 = 17;
+    static final int MODEL_EAR1 = 18;
+    static final int MODEL_BIGTOE1 = 19;
+    static final int MODEL_SMALLTOE1 = 20;
+    static final int MODEL_HEEL1 = 21;
+    static final int MODEL_BIGTOE2 = 22;
+    static final int MODEL_SMALLTOE2 = 23;
+    static final int MODEL_HEEL2 = 24;
+
+
+// from include/openpose/pose/poseParametersRender.hpp
+    static final int[] colors =
+    {
+        0x80ff0055, // NOSE
+        0x80ff0000, // NECK
+        0x80ff5500, // SHOULDER2
+        0x80ffaa00, // ELBOW2 orange
+        0x80ffff00, // WRIST2
+        0x80aaff00, // SHOULDER1 light green
+        0x8055ff00, // ELBOW1
+        0x8000ff00, // WRIST1
+        0x80ff0000, // BUTT
+        0x8000ff55, // HIP2
+        0x8000ffaa,  // KNEE2
+        0x8000ffff, // ANKLE2
+        0x8000aaff, // HIP1
+        0x800055ff, // KNEE1
+        0x800000ff, // ANKLE1
+        0x80ff00aa, // REYE
+        0x80aa00ff, // LEYE
+        0x80ff00ff, // LEAR
+        0x805500ff, // REAR
+        0x800000ff, 
+        0x800000ff, 
+        0x800000ff, 
+        0x8000ffff, 
+        0x8000ffff, 
+        0x8000ffff, 
+    };
+
 
 
     // size of the encoded video
     static final int W = 640;
     static final int H = 360;
-    static OutputStream ffmpeg_stdin;
-    static InputStream ffmpeg_stdout;
-    static String stdinPath;
-    static String stdoutPath;
 
+    static float dstX;
+    static float dstY;
+    static float dstH;
+    static float dstW;
 
-
-    final int OFF = -1;
-    final int STARTUP  = 0;
-    final int CONFIGURING = 1;
-    final int TRACKING = 2;
-    int currentOperation = OFF;
+    static final int OFF = -1;
+    static final int STARTUP  = 0;
+    static final int CONFIGURING = 1;
+    static final int TRACKING = 2;
+    static int currentOperation = OFF;
     int prevOperation = OFF;
 
     int pan;
@@ -162,16 +223,10 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
 
 
         videoBitmap = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+        videoCanvas = new Canvas();
+        videoCanvas.setBitmap(videoBitmap);
 
-        for(int i = 0; i < 2; i++) {
-            frameBuffer[i] = ByteBuffer.allocateDirect(videoBitmap.getByteCount());
-        }
 
-        stdinPath = FFmpegKitConfig.registerNewFFmpegPipe(getContext());
-        stdoutPath = FFmpegKitConfig.registerNewFFmpegPipe(getContext());
-        Log.i("FirstFragment", "onViewCreated " + stdinPath + " " + stdoutPath);
-
-        new Thread(new DecodeThread(this)).start();
         new Thread(client = new ClientThread(this)).start();
 
     }
@@ -274,26 +329,19 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         });
     }
 
-    public void drawVideo() {
+    public void drawVideo(Bitmap bitmap) {
         getActivity().runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 Canvas canvas = video.getHolder().lockCanvas();
 
                 if(canvas != null) {
-//                    Paint p = new Paint();
-//                    p.setColor(Color.BLACK);
-//                    p.setStyle(Paint.Style.FILL);
-//
-//                    canvas.drawRect(new Rect(0, 0, canvas.getWidth(), canvas.getHeight()), p);
+                    Paint p = new Paint();
+// must convert to a software bitmap for draw()
+                    Bitmap softBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+                    videoCanvas.drawBitmap(softBitmap, 0, 0, p);
 
-                    int current = currentFrameBuffer - 1;
-                    if (current < 0)
-                    {
-                        current = 1;
-                    }
-                    videoBitmap.copyPixelsFromBuffer(frameBuffer[current]);
-                    frameBuffer[current].rewind();
+
                     drawGUI(canvas);
 
                     video.getHolder().unlockCanvasAndPost(canvas);
@@ -883,8 +931,8 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
 //        }
 
 // position for tracking vs. configuration
-        float dstX = canvas.getWidth() / 2;
-        float dstY = canvas.getHeight() / 2;
+        dstX = canvas.getWidth() / 2;
+        dstY = canvas.getHeight() / 2;
         if(currentOperation != TRACKING)
         {
             if(landscape)
@@ -904,42 +952,43 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         {
             float xScale;
             float yScale;
-            float dstH;
-            float dstW;
             //Log.i("FirstFragment", "drawGUI canvas.getHeight()=" + canvas.getHeight() + " dstH=" + dstH + " cropped_w=" + cropped_w);
 
             if(currentOperation != TRACKING)
             {
                 dstH = canvas.getHeight() / 2;
-                dstW = dstH * 2 / 3;
+                dstW = dstH * 9 / 16;
             }
             else
             {
                 dstW = canvas.getWidth();
-                dstH = dstW * 3 / 2;
+                dstH = dstW * 16 / 9;
             }
             xScale = (float) dstH / W;
             yScale = (float) dstW / H;
-            matrix.postScale(xScale, -yScale);
-            matrix.postRotate(90);
+            matrix.postScale(xScale, yScale);
+            matrix.postRotate(-90);
             matrix.postTranslate(dstX, dstY);
         }
         else
         {
             float scale1;
             float scale2;
-            float dstH;
-            float dstW;
             float scale;
             if(currentOperation != TRACKING)
             {
                 dstW = canvas.getWidth() / 2;
                 dstH = canvas.getHeight() / 2;
+                if(dstH / dstW > 16.0 / 9)
+                    dstW = dstH * 9 / 16;
                 scale = dstH / W;
             }
-            else {
+            else 
+            {
                 dstW = canvas.getWidth();
                 dstH = canvas.getHeight();
+                if(dstH / dstW > 16.0 / 9)
+                    dstH = dstW * 16 / 9;
                 scale = dstW / H;
             }
             scale1 = (float) dstH / W;
@@ -953,6 +1002,45 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         canvas.drawBitmap(videoBitmap,
                 matrix,
                 p);
+
+Log.i("drawGUI", "dstW=" + dstW + " dstH=" + dstH);
+// draw keypoints
+        for(int j = 0; j < animals; j++)
+        {
+            for(int i = 0; i < colors.length; i++)
+            {
+                p.setColor(colors[i]);
+                drawBodyPart(j, 
+                    i, 
+                    canvas, 
+                    p);
+            }
+            joinBodyParts(canvas, p, j, MODEL_SHOULDER1, MODEL_NECK);
+            joinBodyParts(canvas, p, j, MODEL_SHOULDER2, MODEL_NECK);
+            joinBodyParts(canvas, p, j, MODEL_ELBOW2, MODEL_SHOULDER2);
+            joinBodyParts(canvas, p, j, MODEL_ELBOW1, MODEL_SHOULDER1);
+            joinBodyParts(canvas, p, j, MODEL_WRIST2, MODEL_ELBOW2);
+            joinBodyParts(canvas, p, j, MODEL_WRIST1, MODEL_ELBOW1);
+            joinBodyParts(canvas, p, j, MODEL_NECK, MODEL_BUTT);
+            joinBodyParts(canvas, p, j, MODEL_HIP1, MODEL_BUTT);
+            joinBodyParts(canvas, p, j, MODEL_HIP2, MODEL_BUTT);
+            joinBodyParts(canvas, p, j, MODEL_KNEE1, MODEL_HIP1);
+            joinBodyParts(canvas, p, j, MODEL_KNEE2, MODEL_HIP2);
+            joinBodyParts(canvas, p, j, MODEL_ANKLE1, MODEL_KNEE1);
+            joinBodyParts(canvas, p, j, MODEL_ANKLE2, MODEL_KNEE2);
+            joinBodyParts(canvas, p, j, MODEL_NOSE, MODEL_NECK);
+            joinBodyParts(canvas, p, j, MODEL_EYE2, MODEL_NOSE);
+            joinBodyParts(canvas, p, j, MODEL_EYE1, MODEL_NOSE);
+            joinBodyParts(canvas, p, j, MODEL_EAR1, MODEL_EYE1);
+            joinBodyParts(canvas, p, j, MODEL_EAR2, MODEL_EYE2);
+            joinBodyParts(canvas, p, j, MODEL_HEEL1, MODEL_ANKLE1);
+            joinBodyParts(canvas, p, j, MODEL_HEEL2, MODEL_ANKLE2);
+            joinBodyParts(canvas, p, j, MODEL_BIGTOE1, MODEL_ANKLE1);
+            joinBodyParts(canvas, p, j, MODEL_BIGTOE2, MODEL_ANKLE2);
+            joinBodyParts(canvas, p, j, MODEL_SMALLTOE1, MODEL_BIGTOE1);
+            joinBodyParts(canvas, p, j, MODEL_SMALLTOE2, MODEL_BIGTOE2);
+        }
+
 
         for (int i = 0; i < buttons.size(); i++)
         {
@@ -970,6 +1058,70 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
 
 
 
+    static public void drawBodyPart(int animal,
+        int bodyPart, 
+        Canvas c, 
+        Paint p)
+    {
+        int radius;
+        if(currentOperation != TRACKING)
+            radius = 4;
+        else
+            radius = 8;
+        int offset = animal * BODY_PARTS * 2 + bodyPart * 2;
+        int x = keypoints[offset];
+        int y = keypoints[offset + 1];
+        if(x > 0 || y > 0) 
+        {
+            int x2 = 0;
+            int y2 = 0;
+// scale to screen positions
+            if(landscape)
+            {
+                x2 = (int)(dstX + dstW / 2 - y * dstW / H);
+                y2 = (int)(dstY - dstH / 2 + x * dstH / W);
+            }
+            else
+            {
+                x2 = (int)(dstX - dstW / 2 + x * dstW / H);
+// crop & scale portrait height
+                float portraitScale = (float)(540.0 / 640);
+                y2 = (int)(dstY - dstH * portraitScale / 2 + y * dstH / W);
+            }
+
+            p.setStrokeWidth(1);
+            p.setStyle(Paint.Style.FILL);
+            c.drawCircle(x2, y2, radius, p);
+            keypoint_cache[offset] = x2;
+            keypoint_cache[offset + 1] = y2;
+        }
+        else
+        {
+            keypoint_cache[offset] = 0;
+            keypoint_cache[offset + 1] = 0;
+        }
+    }
+
+    static public void joinBodyParts(Canvas c, 
+        Paint p,
+        int animal,
+        int bodyPart1, 
+        int bodyPart2)
+    {
+        int offset = animal * BODY_PARTS * 2;
+        int x1 = keypoint_cache[offset + bodyPart1 * 2];
+        int y1 = keypoint_cache[offset + bodyPart1 * 2 + 1];
+        int x2 = keypoint_cache[offset + bodyPart2 * 2];
+        int y2 = keypoint_cache[offset + bodyPart2 * 2 + 1];
+
+        if((x1 > 0 || y1 > 0) && (x2 > 0 || y2 > 0))
+        {
+            p.setStyle(Paint.Style.STROKE);
+            p.setColor(colors[bodyPart1]);
+            p.setStrokeWidth(4);
+            c.drawLine(x1, y1, x2, y2, p);
+        }
+    }
 
 
     @Override

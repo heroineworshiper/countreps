@@ -1,0 +1,8 @@
+# copy this to /sdcard/tracker/
+
+
+# address in the field
+ADDRESS 10.0.2.1
+
+
+

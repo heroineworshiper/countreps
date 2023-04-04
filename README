@@ -6,7 +6,7 @@ tracker: camera tracker using openpose
 comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack
 
 
-enclosure4.FCStd: enclosure for a jetson nano terminal
+enclosure4.FCStd: obsolete enclosure for a jetson nano terminal
     .8mm nozzle .32 layer height for
         outer case + bottom
             - intersect with outer masks in blender to get print sections
@@ -33,14 +33,32 @@ enclosure4.FCStd: enclosure for a jetson nano terminal
     Speakers are arduino speakers
     16 gauge metal rod for hinges
     6mm x 3mm magnets
-    
+
+
+
+knob.FCStd: bits for mounting a camera on a pan/tilt head
+
+tripod.FCStd: adapt pan/tilt head to 3/8" tripod bolt
+
 
 --------------------------------------------------------------------------------
 Jetson notes:
 
+Install the NFS server.
+apt install nfs-kernel-server
+Fix /etc/exports
+
+Disable the auto X server by renaming files to .bak.
+
+zram is enabled in
+/etc/systemd/nvzramconfig.sh
+
 Create an /etc/rc.local file for initialization.
 It must be mode 777 & begin with:
 #!/bin/sh -e
+xinit /usr/bin/fvwm2&
+
+
 
 Install fvwm:
 apt install fvwm
@@ -59,6 +77,7 @@ git clone https://github.com/CMU-Perceptual-Computing-Lab/openpose
 Install dependencies:
 apt install libprotobuf-dev protobuf-compiler libgoogle-glog-dev
 apt install libboost-all-dev libhdf5-dev libatlas-base-dev
+apt install libfreetype6-dev
 
 The jetson image has all the CUDA dependencies preinstalled.
 
@@ -83,6 +102,10 @@ but don't work.
 
 --------------------------------------------------------------------------------
 
+
+Countreps requires guicast in the parent directory from 
+https://github.com/heroineworshiper/guicast.git
+
 Compiling countreps is a matter of
 
 make countreps
@@ -100,10 +123,10 @@ make servos
 servos.pcb: USB to PWM circuit board
 
 servos.X: USB to PWM firmware
+    Building servos.X requires mplab.
+    servos runs on an atmega & must be programmed with instructions in servos.c
 
-Building servos.X requires mplab.
-servos runs on an atmega & must be programmed with instructions in servos.c
-
+servos.FCStd: enclosure for servo board
 
 
 tracker.c
