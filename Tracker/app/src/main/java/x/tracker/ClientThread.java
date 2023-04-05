@@ -49,7 +49,6 @@ class ClientThread implements Runnable {
     // packet type
     final int VIJEO = 0x00;
     final int STATUS = 0x01;
-    final int KEYPOINTS = 0x02;
     ExecutorService pool = Executors.newFixedThreadPool(1);
 
     ClientThread(FirstFragment fragment)
@@ -182,7 +181,6 @@ class ClientThread implements Runnable {
 // ping the server
         Log.i("ClientThread", "server=" + SERVER + ":" + RECV_PORT);
         boolean gotStatus = false;
-        boolean gotKeypoints = false;
         sendCommand('*');
 
         while (true) {
@@ -266,29 +264,9 @@ class ClientThread implements Runnable {
                             //Log.i("ClientThread", "GET_DATA type=" + type);
                             if(type == VIJEO)
                             {
-//                                Log.i("ClientThread", "VIJEO size=" + dataSize);
-                                                                                    ImageDecoder.Source imageSource =
-                                ImageDecoder.createSource(ByteBuffer.wrap(packet, 0, dataSize));
-                                // generates a hardware bitmap
-                                Bitmap bitmap = null;
-                                try {
-                                    bitmap = ImageDecoder.decodeBitmap(imageSource);
-                                } catch (IOException e) {
-                                    e.printStackTrace();
-                                }
-                                
-//                                Log.i("ClientThread", "bitmap=" + bitmap);
-//                                                    Log.i("x", "VIJEO w=" + bitmap.getWidth() +
-//                                                            " h=" + bitmap.getHeight() +
-//                                                            " " + bitmap.getColorSpace());
+                                Log.i("ClientThread", "VIJEO size=" + dataSize);
 
-                                if(bitmap != null && gotKeypoints)
-                                    fragment.drawVideo(bitmap);
-                                gotKeypoints = false;
-
-                            }
-                            else if(type == KEYPOINTS)
-                            {
+// extract keypoints
                                 int offset = 0;
                                 FirstFragment.animals = read_uint16(packet, offset);
 //                                 Log.i("ClientThread", 
@@ -302,8 +280,27 @@ class ClientThread implements Runnable {
                                         FirstFragment.keypoints[j] = read_uint16(packet, offset);
                                         offset += 2;
                                     }
-                                    gotKeypoints = true;
                                 }
+
+// extract image
+                                ImageDecoder.Source imageSource =
+                                    ImageDecoder.createSource(
+                                        ByteBuffer.wrap(packet, offset, dataSize - offset));
+                                // generates a hardware bitmap
+                                Bitmap bitmap = null;
+                                try {
+                                    bitmap = ImageDecoder.decodeBitmap(imageSource);
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                }
+                                
+//                                Log.i("ClientThread", "bitmap=" + bitmap);
+//                                                    Log.i("x", "VIJEO w=" + bitmap.getWidth() +
+//                                                            " h=" + bitmap.getHeight() +
+//                                                            " " + bitmap.getColorSpace());
+
+                                if(bitmap != null)
+                                    fragment.drawVideo(bitmap);
                             }
                             else if(type == STATUS)
                             {

@@ -1003,7 +1003,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                 matrix,
                 p);
 
-Log.i("drawGUI", "dstW=" + dstW + " dstH=" + dstH);
+//Log.i("drawGUI", "dstW=" + dstW + " dstH=" + dstH);
 // draw keypoints
         for(int j = 0; j < animals; j++)
         {
