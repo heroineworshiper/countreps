@@ -54,6 +54,7 @@
 #define CAM_H 360
 
 #define MARGIN 10
+#define MAX_JPEG 0x100000
 
 
 #ifdef USE_ATMEGA
@@ -187,7 +188,7 @@ void init_gui();
 void save_defaults();
 void write_servos(int use_pwm_limits);
 void stop_servos();
-void send_vijeo(int current_input);
+void send_vijeo(int current_input, int keypoint_size);
 void send_keypoints(uint8_t *buffer, int size);
 void send_error();
 void init_server();

@@ -52,7 +52,7 @@
 // packet type
 #define VIJEO 0x00
 #define STATUS 0x01
-#define KEYPOINTS 0x02
+//#define KEYPOINTS 0x02
 
 
 #define START_CODE0 0xff
@@ -76,9 +76,8 @@ int current_input2 = -1;
 uint8_t status_buffer[HEADER_SIZE + 32];
 int status_size = 0;
 
-// destination for JPEG compression
-#define MAX_JPEG 0x100000
-uint8_t vijeo_buffer[MAX_JPEG];
+// storage for packet header, keypoints & compressed frame
+extern uint8_t vijeo_buffer[];
 int vijeo_size = 0;
 pthread_mutex_t www_mutex;
 
@@ -104,9 +103,9 @@ METHODDEF(void) init_destination(j_compress_ptr cinfo)
 
 /* Set the pointer to the preallocated buffer */
     vijeo_size = 0;
-  	dest->buffer = vijeo_buffer + HEADER_SIZE;
+  	dest->buffer = vijeo_buffer + HEADER_SIZE + keypoint_size2;
   	dest->pub.next_output_byte = dest->buffer;
-  	dest->pub.free_in_buffer = MAX_JPEG - HEADER_SIZE;
+  	dest->pub.free_in_buffer = MAX_JPEG - HEADER_SIZE - keypoint_size2;
 }
 
 
@@ -153,7 +152,8 @@ METHODDEF(boolean) empty_vijeo_buffer(j_compress_ptr cinfo)
 /* Allocate a bigger buffer. */
 	my_destination_mgr *dest = (my_destination_mgr*)cinfo->dest;
 
-//printf("empty_vijeo_buffer %d %d\n", __LINE__, dest->pub.free_in_buffer);
+// not implemented
+printf("empty_vijeo_buffer %d NOT IMPLEMENTED\n", __LINE__);
 	dest->buffer = vijeo_buffer + HEADER_SIZE;
 	dest->pub.next_output_byte = dest->buffer;
 	dest->pub.free_in_buffer = MAX_JPEG - HEADER_SIZE;
@@ -172,7 +172,7 @@ void compress_jpeg()
     cinfo.input_components = 3;
 	cinfo.in_color_space = JCS_RGB;
     jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, 80, 0);
+    jpeg_set_quality(&cinfo, 50, 0);
     cinfo.dct_method = JDCT_IFAST;
     cinfo.raw_data_in = TRUE;
     my_destination_mgr *dest;
@@ -370,23 +370,16 @@ void send_error()
 }
 
 
-void send_vijeo(int current_input)
+void send_vijeo(int current_input, int keypoint_size)
 {
     pthread_mutex_lock(&www_mutex);
     current_input2 = current_input;
+    keypoint_size2 = keypoint_size;
     sem_post(&data_ready);
     pthread_mutex_unlock(&www_mutex);
 }
 
 
-void send_keypoints(uint8_t *buffer, int size)
-{
-    pthread_mutex_lock(&www_mutex);
-    keypoint_buffer2 = buffer;
-    keypoint_size2 = size;
-    sem_post(&data_ready);
-    pthread_mutex_unlock(&www_mutex);
-}
 
 
 void* web_server_reader(void *ptr)
@@ -586,17 +579,12 @@ void* web_server_writer(void *ptr)
             status_size = 0;
         }
 
-        if(keypoint_size2)
-        {
-            send_packet(KEYPOINTS, keypoint_buffer2, keypoint_size2);
-            keypoint_size2 = 0;
-        }
-
-        if(current_input2 >= 0)
+        if(keypoint_size2 && current_input2 >= 0)
         {
 // compress it
             compress_jpeg();
             send_packet(VIJEO, vijeo_buffer, vijeo_size);
+            keypoint_size2 = 0;
             current_input2 = -1;
         }
 	}

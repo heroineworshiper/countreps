@@ -85,7 +85,8 @@ int current_input = 0;
 uint8_t *hdmi_image[INPUT_IMAGES];
 uint8_t **hdmi_rows[INPUT_IMAGES];
 
-uint8_t keypoint_buffer[HEADER_SIZE + MAX_HUMANS * BODY_PARTS * 4 + 2];
+// storage for packet header, keypoints & compressed frame
+uint8_t vijeo_buffer[HEADER_SIZE + 2 + MAX_HUMANS * BODY_PARTS * 4 + MAX_JPEG];
 
 class Logger : public nvinfer1::ILogger
 {
@@ -1861,7 +1862,7 @@ void do_tracker()
 #else // !USE_SERVER
 
 
-                if(current_input2 < 0 && !keypoint_size2)
+                if(current_input2 < 0)
                 {
 // send keypoints
                     int animals = engine->mPoseKeypoints.getSize(0);
@@ -1871,24 +1872,23 @@ void do_tracker()
                     int max_x = 0;
                     int max_y = 0;
 
-                    keypoint_buffer[offset++] = animals;
-                    keypoint_buffer[offset++] = 0;
+                    vijeo_buffer[offset++] = animals;
+                    vijeo_buffer[offset++] = 0;
                     for(int i = 0; i < animals; i++)
                     {
                         for(int j = 0; j < BODY_PARTS; j++)
                         {
                             int x = (int)engine->mPoseKeypoints[{ i, j, 0 }];
                             int y = (int)engine->mPoseKeypoints[{ i, j, 1 }];
-                            keypoint_buffer[offset++] = x & 0xff;
-                            keypoint_buffer[offset++] = (x >> 8) & 0xff;
-                            keypoint_buffer[offset++] = y & 0xff;
-                            keypoint_buffer[offset++] = (y >> 8) & 0xff;
+                            vijeo_buffer[offset++] = x & 0xff;
+                            vijeo_buffer[offset++] = (x >> 8) & 0xff;
+                            vijeo_buffer[offset++] = y & 0xff;
+                            vijeo_buffer[offset++] = (y >> 8) & 0xff;
                             if(x > max_x) max_x = x;
                             if(y > max_y) max_y = y;
                         }
                     }
-                    send_keypoints(keypoint_buffer, offset - HEADER_SIZE);
-                    send_vijeo(current_input);
+                    send_vijeo(current_input, offset - HEADER_SIZE);
                     current_input = !current_input;
 // printf("do_tracker %d animals=%d max_x=%d max_y=%d\n", 
 // __LINE__, 
