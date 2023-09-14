@@ -1,14 +1,16 @@
 What you'll find here:
 
 countreps: rep counter using openpose
-tracker: camera tracker using openpose & CAFFE/FP32
+tracker: Mane camera tracker for a laptop.
+    Using openpose & CAFFE/FP32
 
 Tracker: the android interface for the tracker
 
 tracker.h
+trackerlib.h
 trackerserver.c
-tracker_trt.c: camera tracker using openpose & TENSORRT/FP16.
-    This version gives useful framerates on a jetson nano.
+tracker_trt.c: The mane camera tracker on the jetson nano.
+    Using openpose & TENSORRT/FP16.
     This requires the body25_*.engine files from
     https://drive.google.com/file/d/1sFKhUgDjm0c-Dv7PBAPgatd569N6yF6p/view?usp=sharing
     https://drive.google.com/file/d/1WnMKvONACR5N7q81nwyrE0Nje4v_iiZj/view?usp=sharing
@@ -16,6 +18,7 @@ tracker_trt.c: camera tracker using openpose & TENSORRT/FP16.
     Build the FP16 camera tracker with make -f Makefile.trt
     Run it with ./tracker_trt
 
+    Uses either local servos.X or truck's arm_cam.c to drive the servos.
 
 comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack.  
     It was envisioned as controlling the tracker but is not currently used.
@@ -23,9 +26,9 @@ comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack.
 
 servos.pcb: USB to PWM circuit board using a PIC
 
-servos.X: USB to PWM firmware
+servos.X: USB to PWM firmware for the 2 axis tracker
     Building servos.X requires mplab.
-    servos runs on a PIC
+    servos.X runs on a PIC
 
 servos.FCStd: enclosure for servo board
 

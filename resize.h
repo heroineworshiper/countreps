@@ -11,4 +11,11 @@ int resizeAndNorm_yuv(void *src,
     int dst_w, 
     int dst_h, 
     cudaStream_t stream);
+int resizeAndNorm_yuv_planar(void *src, 
+    float *dst, 
+    int src_w, 
+    int src_h, 
+    int dst_w, 
+    int dst_h, 
+    cudaStream_t stream);
 #endif //TENSORRT_YOLOV4_RESIZE_H
