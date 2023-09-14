@@ -1,5 +1,5 @@
 /*
- * tracker using body_25 for FP16
+ * 2 axis tracker using body_25 for FP16
  * Copyright (C) 2019-2023 Adam Williams <broadcast at earthling dot net>
  * 
  * This program is free software; you can redistribute it and/or modify
@@ -40,7 +40,6 @@
 #include <math.h>
 #include <memory>
 #include "nmsBase.hpp"
-#include "NvInfer.h"
 #include "point.hpp"
 #include "poseParameters.hpp"
 #include <pthread.h>
@@ -54,30 +53,55 @@
 #include <sys/types.h>
 #include <termios.h>
 #include "tracker.h"
+#include "trackerlib.h"
+#include "body25.h"
 #include <unistd.h>
 
 #define ENGINE_PORTRAIT "body25_240x160.engine"
 #define ENGINE_LANDSCAPE "body25_144x256.engine"
 //#define ENGINE "body25_128x224.engine"
 
-// maximum humans to track
-#define MAX_HUMANS 2
+// maximum animals to track in 2 axis mode
+#define MAX_ANIMALS 2
 
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/videodev2.h>
 #include <fcntl.h>
+#include <libusb.h>
 // video devices
 #define DEVICE0 0
 #define DEVICE1 4
 
+// detect USB enumeration
+// webcam has multiple IDs
+#define WEBCAM_VID1 0x1b3f
+#define WEBCAM_PID1 0x2202
+#define WEBCAM_VID2 0x1b3f
+#define WEBCAM_PID2 0x8301
+#define HDMI_VID 0x534d
+#define HDMI_PID 0x2109
+
 #define VIDEO_BUFFERS 1
 
 
+// analog values from arm_cam.c
+// an offset is added to the ADC to get this range
+#define ADC_CENTER 128
+#define ADC_DEADBAND 5
+#define ADC_MAX 64
+#define MAX_ADC_OFFSET 32
+// minimums
+#define MIN_LEFT (ADC_CENTER + ADC_DEADBAND)
+#define MIN_RIGHT (ADC_CENTER - ADC_DEADBAND)
+// maximums
+#define MAX_LEFT (ADC_CENTER + ADC_MAX)
+#define MAX_RIGHT (ADC_CENTER - ADC_MAX)
 
-int decoded_w = 0;
-int decoded_h = 0;
+
+
 int current_input = 0;
+unsigned char *mmap_buffer[VIDEO_BUFFERS];
 
 // copy of the mmap image sent to the server
 // 1 is owned by the server for JPEG compression
@@ -85,22 +109,15 @@ int current_input = 0;
 uint8_t *hdmi_image[INPUT_IMAGES];
 uint8_t **hdmi_rows[INPUT_IMAGES];
 
+// HDMI or TRUCK dimensions
+int input_w;
+int input_h;
+
 // storage for packet header, keypoints & compressed frame
-uint8_t vijeo_buffer[HEADER_SIZE + 2 + MAX_HUMANS * BODY_PARTS * 4 + MAX_JPEG];
+uint8_t vijeo_buffer[HEADER_SIZE + 2 + 2 + MAX_ANIMALS * BODY_PARTS * 4 + MAX_JPEG];
 
-class Logger : public nvinfer1::ILogger
-{
-public:
-    Logger(Severity severity = Severity::kWARNING)
-    {
-    }
-
-    void log(Severity severity, const char* msg) noexcept
-    {
-        printf("%s\n", msg);
-    }
-};
-Logger gLogger;
+Engine landscape_engine;
+Engine portrait_engine;
 
 
 // write a buffer as a PPM image
@@ -164,298 +181,6 @@ void write_test(const char *path,
     printf("Wrote %s min=%f max=%f\n", path, min, max);
     free(test_buffer);
 }
-
-class Engine
-{
-public:
-    nvinfer1::ICudaEngine *engine;
-    nvinfer1::IExecutionContext *context;
-    std::vector<nvinfer1::Dims> inputDims;
-    std::vector<nvinfer1::Dims> outputDims;
-    int batchSize;
-    int numChannels;
-// camera input
-    int cam_w;
-    int cam_h;
-	void *hdmiCUDA = 0; 
-// network dimensions
-	int inputH;
-	int inputW;
-    int outputH;
-    int outputW;
-    std::vector<void*> cudaBuffers;
-#define MAP_SIZE 78
-#define PEAKS_W 128
-#define PEAKS_H 3
-#define MAX_PEAKS (PEAKS_W - 1)
-    void *heatMapsBlobGPU;
-    void *peaksBlobGPU;
-    float *peaksBlobCPU;
-    void *kernelGPU;
-    void *bodyPartPairsGPU;
-    op::Array<float> mFinalOutputCpu;
-    void *pFinalOutputGpuPtr;
-    void *mapIdxGpuPtr;
-    op::Array<float> mPoseKeypoints;
-    op::Array<float> mPoseScores;
-    cudaStream_t cudaStream;
-
-
-    std::size_t getSizeByDim(const nvinfer1::Dims& dims)
-    {
-	    std::size_t size = 1;
-	    for (std::size_t i = 0; i < dims.nbDims; ++i)
-	    {
-		    size *= dims.d[i];
-	    }
-	    return size;
-    }
-
-    double resizeGetScaleFactor(int w1, int h1, int w2, int h2)
-    {
-        const auto ratioWidth = (double)(w2 - 1) / (double)(w1 - 1);
-        const auto ratioHeight = (double)(h2 - 1) / (double)(h1 - 1);
-        return MIN(ratioWidth, ratioHeight);
-    }
-
-
-    template<typename T>
-    inline int positiveIntRound(const T a)
-    {
-        return int(a+0.5f);
-    }
-
-
-    void load(const char *path, int cam_w, int cam_h)
-    {
-        printf("Engine::load %d: Opening model %s\n", __LINE__, path);
-        FILE *fd = fopen(path, "r");
-        if(!fd)
-        {
-            printf("Engine::load %d: Couldn't open engine %s\n", __LINE__, path);
-            exit(1);
-        }
-        fseek(fd, 0, SEEK_END);
-        int len = ftell(fd);
-        fseek(fd, 0, SEEK_SET);
-        auto data = new char[len];
-        int _ = fread(data, 1, len, fd);
-        fclose(fd);
-
-	    auto runtime = nvinfer1::createInferRuntime(gLogger);
-	    engine = runtime->deserializeCudaEngine(data, len, nullptr);
-        delete [] data;
-        context = engine->createExecutionContext();
-        
-        cudaBuffers.resize(engine->getNbBindings());
-	    for (size_t i = 0; i < engine->getNbBindings(); ++i)
-	    {
-		    auto bindingSize = getSizeByDim(engine->getBindingDimensions(i)) * 
-                1 * 
-                sizeof(float);
-// cudaBuffers[0] is input
-// cudaBuffers[1] is output
-		    cudaMalloc(&cudaBuffers[i], bindingSize);
-		    if(engine->bindingIsInput(i))
-		    {
-			    inputDims.emplace_back(engine->getBindingDimensions(i));
-		    }
-		    else
-		    {
-			    outputDims.emplace_back(engine->getBindingDimensions(i));
-		    }
-// 		    printf("Engine::load %d: binding=%s", 
-//                 __LINE__,
-//                 engine->getBindingName(i));
-	    }
-
-	    batchSize = inputDims[0].d[0];
-	    numChannels = inputDims[0].d[1];
-	    inputH = inputDims[0].d[2];
-	    inputW = inputDims[0].d[3];
-        outputH = outputDims[0].d[2];
-        outputW = outputDims[0].d[3];
-		printf("Engine::load %d: batchSize=%d numChannels=%d cam_w=%d cam_h=%d inputW=%d inputH=%d outputW=%d outputW=%d\n", 
-            __LINE__,
-            batchSize,
-            numChannels,
-            cam_w,
-            cam_h,
-            inputW,
-            inputH,
-            outputW,
-            outputH);
-        this->cam_w = cam_w;
-        this->cam_h = cam_h;
-        
-	    cudaMalloc(&hdmiCUDA, HDMI_W * HDMI_H * 2); 
-	    cudaStreamCreate(&cudaStream);
-        cudaMalloc(&heatMapsBlobGPU, 
-            outputDims[0].d[1] *
-            inputW * 
-            inputH * sizeof(float));
-        cudaMalloc(&peaksBlobGPU, 
-            BODY_PARTS * PEAKS_W * PEAKS_H * sizeof(float));
-        peaksBlobCPU = (float*)malloc(BODY_PARTS * PEAKS_W * PEAKS_H * sizeof(float));
-        cudaMalloc(&kernelGPU, 
-            MAP_SIZE * inputW * inputH * sizeof(int));
-
-        const auto& bodyPartPairs = op::getPosePartPairs(BODY_25);
-        int numberBodyPartPairs = bodyPartPairs.size() / 2;
-        int totalComputations = numberBodyPartPairs * MAX_PEAKS * MAX_PEAKS;
-        cudaMalloc(&pFinalOutputGpuPtr,
-            totalComputations * sizeof(float));
-        mFinalOutputCpu.reset({(int)numberBodyPartPairs, MAX_PEAKS, MAX_PEAKS});
-        cudaMalloc(&bodyPartPairsGPU,
-            bodyPartPairs.size() * sizeof(unsigned int));
-        cudaMemcpy(bodyPartPairsGPU, 
-            &bodyPartPairs[0], 
-            bodyPartPairs.size() * sizeof(unsigned int),
-            cudaMemcpyHostToDevice);
-        const auto& mapIdxOffset = op::getPoseMapIndex(BODY_25);
-        // Update mapIdx
-        const auto offset = (op::addBkgChannel(BODY_25) ? 1 : 0);
-        auto mapIdx = mapIdxOffset;
-        for (auto& i : mapIdx)
-            i += (BODY_PARTS+offset);
-        cudaMalloc(&mapIdxGpuPtr, 
-            mapIdx.size() * sizeof(unsigned int));
-        cudaMemcpy(mapIdxGpuPtr, 
-            &mapIdx[0], 
-            mapIdx.size() * sizeof(unsigned int),
-            cudaMemcpyHostToDevice);
-    }
-    
-    
-    void process()
-    {
-        mPoseKeypoints.setTo(0);
-#ifdef RAW_HDMI
-// transfer input to GPU
-	    cudaMemcpy(hdmiCUDA,  // dst
-            hdmi_image[current_input], // src
-            HDMI_W * HDMI_H * 2, 
-            cudaMemcpyHostToDevice);
-// convert to network size & RGB
-		resizeAndNorm_yuv(hdmiCUDA,   // src
-            (float*)cudaBuffers[0],  // dst
-            HDMI_W, // srcW
-            HDMI_H, // srcH
-            inputW, // dstW
-            inputH, // dstH
-            cudaStream);
-        cudaDeviceSynchronize();
-        cudaError_t error = cudaGetLastError();
-        if(error != 0)
-            printf("Engine::process %d: %d %s\n", __LINE__, error, cudaGetErrorString(error) );
-// write_test("/tmp/tracker2.ppm", cudaBuffers[0], numChannels, 1, inputW, inputH);
-// 
-// // DEBUG
-// static int debug = 0;
-// debug++;
-// if(debug > 10) exit(0);
-
-#endif
-
-// Inference
-	    context->enqueue(batchSize, 
-            cudaBuffers.data(), 
-            cudaStream, 
-            nullptr);
-
-
-        std::vector<std::array<int, 4>> mBottomSizes;
-        std::array<int, 4> mTopSize = {
-            outputDims[0].d[0], 
-            outputDims[0].d[1], 
-            inputH, 
-            inputW
-        };
-        std::vector<float> mScaleRatios = { 1.0 };
-        mBottomSizes.resize(1);
-        mBottomSizes[0] = std::array<int, 4>{
-            outputDims[0].d[0], 
-            outputDims[0].d[1], 
-            outputH, 
-            outputW
-        };
-        std::vector<const float*> sourcePtrs(1);
-        sourcePtrs[0] = (const float*)cudaBuffers[1];
-// scale back up to input network size
-        op::resizeAndMergeGpu((float*)heatMapsBlobGPU,  // dst
-            sourcePtrs, // src
-            mTopSize, // dst
-            mBottomSizes, // src
-            mScaleRatios);
-
-        auto scaleProducerToNetInput = resizeGetScaleFactor( 
-            cam_w, 
-            cam_h,
-            inputW, 
-            inputH);
-        int net_w = positiveIntRound(scaleProducerToNetInput * cam_w);
-        int net_h = positiveIntRound(scaleProducerToNetInput * cam_h);
-        auto mScaleNetToOutput = (float)resizeGetScaleFactor(
-            net_w,
-            net_h,
-            cam_w,
-            cam_h);
-        auto nmsOffset = float(0.5/double(mScaleNetToOutput));
-        op::Point<float> offset = { nmsOffset, nmsOffset };
-        std::array<int, 4> targetSize = 
-        {
-            1, 
-            BODY_PARTS, 
-            PEAKS_W, 
-            PEAKS_H 
-        };
-        std::array<int, 4> sourceSize = 
-        {
-            1, 
-            MAP_SIZE, 
-            inputH, 
-            inputW 
-        };
-
-        op::nmsGpu(
-            (float*)peaksBlobGPU, // dst
-            (int*)kernelGPU, 
-            (float*)heatMapsBlobGPU, // src
-            (float)0.050000, // threshold
-            targetSize,
-            sourceSize, 
-            offset);
-// required copy
-        cudaMemcpy(peaksBlobCPU, 
-            peaksBlobGPU, 
-            BODY_PARTS * PEAKS_W * PEAKS_H * sizeof(float), 
-            cudaMemcpyDeviceToHost);
-
-        op::connectBodyPartsGpu(
-            mPoseKeypoints, 
-            mPoseScores, 
-            (float*)heatMapsBlobGPU, // GPU pointer
-            (float*)peaksBlobCPU, // CPU pointer
-            BODY_25, // poseModel
-            op::Point<int>{inputW, inputH}, 
-            MAX_PEAKS,  // maxPeaks
-            (float).95, // interMinAboveThreshold,
-            (float).05, // interThreshold, 
-            3, // minSubsetCnt, 
-            (float).4, // minSubsetScore, 
-            (float).05, // defaultNmsThreshold,
-            (float)mScaleNetToOutput, // scaleFactor, 
-            false, // maximizePositives, 
-            mFinalOutputCpu, // pairScoresCpu, 
-            (float*)pFinalOutputGpuPtr, // pairScoresGpuPtr,
-            (unsigned int*)bodyPartPairsGPU, // bodyPartPairsGpuPtr
-            (unsigned int*)mapIdxGpuPtr, // mapIdxGpuPtr
-            (float*)peaksBlobGPU); // peaksGpuPtr
-    }
-};
-
-Engine landscape_engine;
-Engine portrait_engine;
 
 
 lens_t lenses[] = 
@@ -571,13 +296,17 @@ typedef struct
 
 typedef struct
 {
+    int orig_animal;
     int x1, y1, x2, y2;
 // last detected size of the head for tilt tracking
     int head_size;
     zone_t zones[TOTAL_ZONES];
 } body_t;
 
-static body_t bodies[MAX_HUMANS];
+// value from the protobuf file
+#define MAX_ANIMALS2 255
+// entries in mPoseKeypoints sorted by size
+static body_t bodies[MAX_ANIMALS2];
 
 // raw PWM values
 float pan = PAN0;
@@ -588,74 +317,20 @@ int pan_sign = 1;
 int tilt_sign = 1;
 int lens = LENS_15;
 int landscape = 1;
+// truck cam with body25
+int is_truck = 0;
+// current ADC for truck cam
+int adc = 0;
+// feedback for truck cam
+int deadband = 5;
+int speed = 100;
 
 static int servo_fd = -1;
 static int frames = 0;
 static FILE *ffmpeg_fd = 0;
 
 int current_operation = STARTUP;
-uint8_t error_flags = 0xff;
-
-int init_serial(const char *path)
-{
-	struct termios term;
-    int verbose = 0;
-
-	if(verbose) printf("init_serial %d: opening %s\n", __LINE__, path);
-
-// Initialize serial port
-	int fd = open(path, O_RDWR | O_NOCTTY | O_SYNC);
-	if(fd < 0)
-	{
-		if(verbose) printf("init_serial %d: path=%s: %s\n", __LINE__, path, strerror(errno));
-		return -1;
-	}
-	
-	if (tcgetattr(fd, &term))
-	{
-		if(verbose) printf("init_serial %d: path=%s %s\n", __LINE__, path, strerror(errno));
-		close(fd);
-		return -1;
-	}
-
-
-/*
- * printf("init_serial: %d path=%s iflag=0x%08x oflag=0x%08x cflag=0x%08x\n", 
- * __LINE__, 
- * path, 
- * term.c_iflag, 
- * term.c_oflag, 
- * term.c_cflag);
- */
-	tcflush(fd, TCIOFLUSH);
-	cfsetispeed(&term, B115200);
-	cfsetospeed(&term, B115200);
-//	term.c_iflag = IGNBRK;
-	term.c_iflag = 0;
-	term.c_oflag = 0;
-	term.c_lflag = 0;
-//	term.c_cflag &= ~(PARENB | PARODD | CRTSCTS | CSTOPB | CSIZE);
-//	term.c_cflag |= CS8;
-	term.c_cc[VTIME] = 1;
-	term.c_cc[VMIN] = 1;
-/*
- * printf("init_serial: %d path=%s iflag=0x%08x oflag=0x%08x cflag=0x%08x\n", 
- * __LINE__, 
- * path, 
- * term.c_iflag, 
- * term.c_oflag, 
- * term.c_cflag);
- */
-	if(tcsetattr(fd, TCSANOW, &term))
-	{
-		if(verbose) printf("init_serial %d: path=%s %s\n", __LINE__, path, strerror(errno));
-		close(fd);
-		return -1;
-	}
-
-	printf("init_serial %d: opened %s\n", __LINE__, path);
-	return fd;
-}
+uint8_t error_flags = 0x00;
 
 
 void* servo_reader(void *ptr)
@@ -901,45 +576,57 @@ void write_servos(int use_pwm_limits)
 {
 	if(servo_fd >= 0)
 	{
-#define SYNC_CODE0 0xff
-#define SYNC_CODE1 0x2d
-#define SYNC_CODE2 0xd4
-#define SYNC_CODE3 0xe5
-#define BUFFER_SIZE 8
-
-// limits are absolute PWM limits
-        if(use_pwm_limits)
+        if(is_truck)
         {
-            CLAMP(pan, MIN_PWM, MAX_PWM);
-            CLAMP(tilt, MIN_PWM, MAX_PWM);
+// 1 axis
+            char buffer[1];
+            buffer[0] = adc;
+		    int temp = write(servo_fd, buffer, 1);
+//printf("write_servos %d %d\n", __LINE__, adc);
         }
         else
-// limits are relative to the starting position
         {
-            CLAMP(pan, start_pan - PAN_MAG, start_pan + PAN_MAG);
-            CLAMP(tilt, start_tilt - TILT_MAG, start_tilt + TILT_MAG);
+// 2 axis
+    #define SYNC_CODE0 0xff
+    #define SYNC_CODE1 0x2d
+    #define SYNC_CODE2 0xd4
+    #define SYNC_CODE3 0xe5
+    #define BUFFER_SIZE 8
+
+    // limits are absolute PWM limits
+            if(use_pwm_limits)
+            {
+                CLAMP(pan, MIN_PWM, MAX_PWM);
+                CLAMP(tilt, MIN_PWM, MAX_PWM);
+            }
+            else
+    // limits are relative to the starting position
+            {
+                CLAMP(pan, start_pan - PAN_MAG, start_pan + PAN_MAG);
+                CLAMP(tilt, start_tilt - TILT_MAG, start_tilt + TILT_MAG);
+            }
+
+            uint16_t pan_i = (uint16_t)pan;
+            uint16_t tilt_i = (uint16_t)tilt;
+		    char buffer[BUFFER_SIZE];
+            buffer[0] = SYNC_CODE0;
+            buffer[1] = SYNC_CODE1;
+            buffer[2] = SYNC_CODE2;
+            buffer[3] = SYNC_CODE3;
+            buffer[4] = pan_i;
+            buffer[5] = pan_i >> 8;
+            buffer[6] = tilt_i;
+            buffer[7] = tilt_i >> 8;
+
+    //printf("write_servos %d %d %d\n", __LINE__, pan_i,  tilt_i);
+		    int temp = write(servo_fd, buffer, BUFFER_SIZE);
         }
-
-        uint16_t pan_i = (uint16_t)pan;
-        uint16_t tilt_i = (uint16_t)tilt;
-		char buffer[BUFFER_SIZE];
-        buffer[0] = SYNC_CODE0;
-        buffer[1] = SYNC_CODE1;
-        buffer[2] = SYNC_CODE2;
-        buffer[3] = SYNC_CODE3;
-        buffer[4] = pan_i;
-        buffer[5] = pan_i >> 8;
-        buffer[6] = tilt_i;
-        buffer[7] = tilt_i >> 8;
-
-//printf("write_servos %d %d %d\n", __LINE__, pan_i,  tilt_i);
-		int temp = write(servo_fd, buffer, BUFFER_SIZE);
 	}
 }
 
 void stop_servos()
 {
-	if(servo_fd >= 0)
+	if(servo_fd >= 0 && !is_truck)
 	{
 #define SYNC_CODE0 0xff
 #define SYNC_CODE1 0x2d
@@ -967,20 +654,25 @@ void stop_servos()
 
 void do_startup()
 {
+    if(!is_truck)
+    {
 // write it a few times to defeat UART initialization glitches
-    write_servos(1);
-    usleep(100000);
-    write_servos(1);
-    usleep(100000);
-    write_servos(1);
-    usleep(100000);
-    write_servos(1);
+        write_servos(1);
+        usleep(100000);
+        write_servos(1);
+        usleep(100000);
+        write_servos(1);
+        usleep(100000);
+        write_servos(1);
+    }
 }
 
 
 void load_defaults()
 {
-    char *home = getenv("HOME");
+// HOME not available in /etc/rc.local
+//    char *home = getenv("HOME");
+    char *home = "/root";
     char string[TEXTLEN];
     sprintf(string, "%s/.tracker.rc", home);
     FILE *fd = fopen(string, "r");
@@ -1080,7 +772,22 @@ void load_defaults()
         if(!strcasecmp(key, "LANDSCAPE"))
         {
             landscape = atoi(value);
-        }        
+        }
+        else
+        if(!strcasecmp(key, "TRUCK"))
+        {
+            is_truck = atoi(value);
+        }
+        else
+        if(!strcasecmp(key, "DEADBAND"))
+        {
+            deadband = atoi(value);
+        }
+        else
+        if(!strcasecmp(key, "SPEED"))
+        {
+            speed = atoi(value);
+        }
     }
 
     fclose(fd);
@@ -1088,7 +795,9 @@ void load_defaults()
 
 void save_defaults()
 {
-    char *home = getenv("HOME");
+// HOME not available in /etc/rc.local
+//    char *home = getenv("HOME");
+    char *home = "/root";
     char string[TEXTLEN];
     sprintf(string, "%s/.tracker.rc", home);
     FILE *fd = fopen(string, "w");
@@ -1107,134 +816,22 @@ void save_defaults()
     fprintf(fd, "TILT_SIGN %d\n", tilt_sign);
     fprintf(fd, "LENS %d\n", lens);
     fprintf(fd, "LANDSCAPE %d\n", landscape);
+    fprintf(fd, "########################################\n");
+    fprintf(fd, "TRUCK %d\n", is_truck);
+    fprintf(fd, "DEADBAND %d\n", deadband);
+    fprintf(fd, "SPEED %d\n", speed);
 
     fclose(fd);
 }
 
-
-
-
-
-typedef struct 
+void dump_settings()
 {
-	struct jpeg_source_mgr pub;	/* public fields */
-
-	JOCTET * buffer;		/* start of buffer */
-	int bytes;             /* total size of buffer */
-} jpeg_source_mgr_t;
-typedef jpeg_source_mgr_t* jpeg_src_ptr;
-
-
-struct my_jpeg_error_mgr {
-  struct jpeg_error_mgr pub;	/* "public" fields */
-  jmp_buf setjmp_buffer;	/* for return to caller */
-};
-
-static struct my_jpeg_error_mgr my_jpeg_error;
-
-METHODDEF(void) init_source(j_decompress_ptr cinfo)
-{
-    jpeg_src_ptr src = (jpeg_src_ptr) cinfo->src;
+    printf("dump_settings %d\n", __LINE__);
+    printf("TRUCK %d\n", is_truck);
+    printf("DEADBAND %d\n", deadband);
+    printf("SPEED %d\n", speed);
 }
 
-METHODDEF(boolean) fill_input_buffer(j_decompress_ptr cinfo)
-{
-	jpeg_src_ptr src = (jpeg_src_ptr) cinfo->src;
-#define   M_EOI     0xd9
-
-	src->buffer[0] = (JOCTET)0xFF;
-	src->buffer[1] = (JOCTET)M_EOI;
-	src->pub.next_input_byte = src->buffer;
-	src->pub.bytes_in_buffer = 2;
-
-	return TRUE;
-}
-
-
-METHODDEF(void) skip_input_data(j_decompress_ptr cinfo, long num_bytes)
-{
-	jpeg_src_ptr src = (jpeg_src_ptr)cinfo->src;
-
-	src->pub.next_input_byte += (size_t)num_bytes;
-	src->pub.bytes_in_buffer -= (size_t)num_bytes;
-}
-
-
-METHODDEF(void) term_source(j_decompress_ptr cinfo)
-{
-}
-
-METHODDEF(void) my_jpeg_output (j_common_ptr cinfo)
-{
-}
-
-
-METHODDEF(void) my_jpeg_error_exit (j_common_ptr cinfo)
-{
-/* cinfo->err really points to a mjpeg_error_mgr struct, so coerce pointer */
-  	struct my_jpeg_error_mgr* mjpegerr = (struct my_jpeg_error_mgr*) cinfo->err;
-
-printf("my_jpeg_error_exit %d\n", __LINE__);
-/* Always display the message. */
-/* We could postpone this until after returning, if we chose. */
-  	(*cinfo->err->output_message) (cinfo);
-
-/* Return control to the setjmp point */
-  	longjmp(mjpegerr->setjmp_buffer, 1);
-}
-
-
-
-void decompress_jpeg(uint8_t *picture_data, int picture_size)
-{
-    if(picture_data[0] != 0xff ||
-        picture_data[1] != 0xd8 ||
-        picture_data[2] != 0xff ||
-        picture_data[3] != 0xdb)
-        return;
-
-	struct jpeg_decompress_struct cinfo;
-	cinfo.err = jpeg_std_error(&(my_jpeg_error.pub));
-    my_jpeg_error.pub.error_exit = my_jpeg_error_exit;
-
-    my_jpeg_error.pub.output_message = my_jpeg_output;
-	jpeg_create_decompress(&cinfo);
-	if(setjmp(my_jpeg_error.setjmp_buffer))
-	{
-        jpeg_destroy_decompress(&cinfo);
-        return;
-    }
-	cinfo.src = (struct jpeg_source_mgr*)
-    	(*cinfo.mem->alloc_small)((j_common_ptr)&cinfo, 
-        JPOOL_PERMANENT,
-		sizeof(jpeg_source_mgr_t));
-	jpeg_src_ptr src = (jpeg_src_ptr)cinfo.src;
-	src->pub.init_source = init_source;
-	src->pub.fill_input_buffer = fill_input_buffer;
-	src->pub.skip_input_data = skip_input_data;
-	src->pub.resync_to_restart = jpeg_resync_to_restart; /* use default method */
-	src->pub.term_source = term_source;
-	src->pub.bytes_in_buffer = picture_size;
-	src->pub.next_input_byte = picture_data;
-	src->buffer = picture_data;
-	src->bytes = picture_size;
-
-	jpeg_read_header(&cinfo, 1);
-	jpeg_start_decompress(&cinfo);
-
-    decoded_w = cinfo.output_width;
-    decoded_h = cinfo.output_height;
-//printf("decompress_jpeg %d w=%d h=%d\n", __LINE__, decoded_w, decoded_h);
-
-	while(cinfo.output_scanline < decoded_h)
-	{
-		int num_scanlines = jpeg_read_scanlines(&cinfo, 
-			&hdmi_rows[current_input][cinfo.output_scanline],
-			decoded_h - cinfo.output_scanline);
-	}
-
-    jpeg_destroy_decompress(&cinfo);
-}
 
 void reset_zone(zone_t *zone, int *parts)
 {
@@ -1280,118 +877,26 @@ void do_feedback(double delta,
     int w, 
     int h)
 {
-    int humans = poseKeypoints.getSize(0);
-    if(humans > MAX_HUMANS)
+    int animals = poseKeypoints.getSize(0);
+    if(animals > MAX_ANIMALS)
     {
-        humans = MAX_HUMANS;
+        animals = MAX_ANIMALS;
+    }
+    
+    if(is_truck)
+    {
+        if(animals > 1)
+            animals = 1;
     }
 
-// printf("do_feedback %d humans=%d w=%d h=%d\n", 
+// printf("do_feedback %d animals=%d w=%d h=%d\n", 
 // __LINE__, 
-// humans,
+// animals,
 // w,
 // h);
 
 
-    for (int human = 0 ; 
-        human < humans; 
-        human++)
-    {
-        const auto& bodyParts = poseKeypoints.getSize(1);
-        body_t *body = &bodies[human];
-// reset the zones
-        for(int i = 0; i < TOTAL_ZONES; i++)
-        {
-            reset_zone(&body->zones[i], zone_parts[i]);
-        }
-
-
-        if(bodyParts >= BODY_PARTS)
-        {
-// get bounding box of all body parts for now
-            int have_body_part = 0;
-            for(int body_part = 0; body_part < BODY_PARTS; body_part++)
-            {
-                int x = (int)poseKeypoints[{ human, body_part, 0 }];
-                int y = (int)poseKeypoints[{ human, body_part, 1 }];
-
-// body part was detected
-                if(x > 0 && y > 0)
-                {
-// initialize the coords
-                    if(!have_body_part)
-                    {
-                        body->x1 = body->x2 = x;
-                        body->y1 = body->y2 = y;
-                        have_body_part = 1;
-                    }
-                    else
-                    {
-// get extents of coords
-                        if(body->x1 > x)
-                        {
-                            body->x1 = x;
-                        }
-
-                        if(body->x2 < x)
-                        {
-                            body->x2 = x;
-                        }
-
-                        if(body->y1 > y)
-                        {
-                            body->y1 = y;
-                        }
-
-                        if(body->y2 < y)
-                        {
-                            body->y2 = y;
-                        }
-                    }
-
-
-// update the zone this body part belongs to
-                    for(int i = 0; i < TOTAL_ZONES; i++)
-                    {
-                        update_zone(&body->zones[i], body_part, x, y);
-                    }
-                }
-            }
-
-
-// get the head size from the head zones
-            if(body->zones[NECK_ZONE].total &&
-                body->zones[HEAD_ZONE].total)
-            {
-// expand head by 1/3 since openpose only detects eyes
-// assume the head is vertical
-                int h = body->zones[NECK_ZONE].max_y -
-                    body->zones[HEAD_ZONE].min_y;
-                body->y1 -= h / 2;
-                body->zones[HEAD_ZONE].min_y -= h / 2;
-
-                body->head_size = body->zones[NECK_ZONE].max_y -
-                    body->zones[HEAD_ZONE].min_y;
-            }
-
-
-// debug
-//                     for(int i = 0; i < TOTAL_ZONES; i++)
-//                     {
-//                         if(body->zones[i].total)
-//                         {
-//                             printf("zone %d: y=%d-%d total=%d ", 
-//                                 i,
-//                                 body->zones[i].min_y, 
-//                                 body->zones[i].max_y, 
-//                                 body->zones[i].total);
-//                         }
-//                     }
-//                     printf("\n");
-        }
-    }
-
-// focal point of all humans
+// focal point of all animals
     float total_x = 0;
     float total_y = 0;
     int center_x = w / 2;
@@ -1403,7 +908,7 @@ void do_feedback(double delta,
     bzero(zones, sizeof(zone_t) * TOTAL_ZONES);
 
 // fuse all bodies
-    for(int human = 0; human < humans; human++)
+    for(int human = 0; human < animals; human++)
     {
         body_t *body = &bodies[human];
 
@@ -1430,36 +935,71 @@ void do_feedback(double delta,
     }
 
 
-    if(humans > 0)
+    if(animals > 0)
     {
 // average coords of all bodies
-        total_x /= humans;
-        total_y /= humans;
+        total_x /= animals;
+        total_y /= animals;
 
-// track horizontal avg of all bodies
-        int x_error = calculate_error(total_x, 
-            center_x);
-        if(TO_PERCENT_X(abs(x_error)) > lenses[lens].deadband)
+        if(is_truck)
         {
-            float pan_change = delta * 
-                lenses[lens].x_gain * 
-                TO_PERCENT_X(x_error);
-            CLAMP(pan_change, 
-                -lenses[lens].max_pan_change, 
-                lenses[lens].max_pan_change);
-            pan += pan_change * pan_sign;
+            int x_error = TO_PERCENT_X(calculate_error(total_x, 
+                center_x));
+            if(x_error >= deadband)
+            {
+                adc = MIN_LEFT +
+                    (MAX_LEFT - MIN_LEFT) *
+                    (x_error - deadband) *
+                    speed / 
+                    100 /
+                    100;
+                CLAMP(adc, 0, 255);
+            }
+            else
+            if(x_error < -deadband)
+            {
+                adc = MIN_RIGHT - 
+                    (MIN_RIGHT - MAX_RIGHT) *
+                    (-deadband - x_error) * 
+                    speed / 
+                    100 /
+                    100;
+                CLAMP(adc, 0, 255);
+            }
+            else
+            {
+// stop servo
+                adc = ADC_CENTER;
+            }
 
-// printf("do_feedback %d delta=%f x_error=%d percent=%d pan_change=%f\n", 
-// __LINE__, 
-// delta,
-// x_error, 
-// TO_PERCENT_X(x_error), 
-// pan_change);
+//printf("do_feedback %d adc=%d\n", __LINE__, adc);
         }
+        else
+        {
+// track horizontal avg of all bodies
+            int x_error = calculate_error(total_x, 
+                center_x);
+            if(TO_PERCENT_X(abs(x_error)) > lenses[lens].deadband)
+            {
+                float pan_change = delta * 
+                    lenses[lens].x_gain * 
+                    TO_PERCENT_X(x_error);
+                CLAMP(pan_change, 
+                    -lenses[lens].max_pan_change, 
+                    lenses[lens].max_pan_change);
+                pan += pan_change * pan_sign;
+
+    // printf("do_feedback %d delta=%f x_error=%d percent=%d pan_change=%f\n", 
+    // __LINE__, 
+    // delta,
+    // x_error, 
+    // TO_PERCENT_X(x_error), 
+    // pan_change);
+            }
 
 
 #ifdef TRACK_TILT
-        int top_y = FROM_PERCENT_Y(lenses[lens].top_y);
+            int top_y = FROM_PERCENT_Y(lenses[lens].top_y);
 // // range of top_y based on head size
 //                     int top_y1 = FROM_PERCENT_Y(TOP_Y1);
 //                     int top_y = top_y1;
@@ -1488,66 +1028,67 @@ void do_feedback(double delta,
 
 
 
-        int y_error = 0;
-        float tilt_change = 0;
-// head & foot zones visible.  Track the center or the head.
-        if(zones[HEAD_ZONE].total > 0 &&
-            zones[FOOT_ZONE].total > 0)
-        {
-// head is too high.  track the head
-            if(zones[HEAD_ZONE].min_y < top_y)
+            int y_error = 0;
+            float tilt_change = 0;
+    // head & foot zones visible.  Track the center or the head.
+            if(zones[HEAD_ZONE].total > 0 &&
+                zones[FOOT_ZONE].total > 0)
             {
-                y_error = calculate_error(zones[HEAD_ZONE].min_y, 
-                    top_y);
+    // head is too high.  track the head
+                if(zones[HEAD_ZONE].min_y < top_y)
+                {
+                    y_error = calculate_error(zones[HEAD_ZONE].min_y, 
+                        top_y);
+                }
+                else
+    // track the center of the body
+                {
+                    y_error = calculate_error(total_y, 
+                        center_y);
+                }
+
             }
             else
-// track the center of the body
+    // head is visible but feet are hidden.  Track the head.
+            if(zones[HEAD_ZONE].total > 0)
             {
-                y_error = calculate_error(total_y, 
-                    center_y);
+    // assume the body is too big to fit in frame, 
+    // so track the minimum y of any head.
+    //                        if(biggest_h > height / 2)
+                {
+                    y_error = calculate_error(zones[HEAD_ZONE].min_y, 
+                        top_y);
+                }
+    //                         else
+    //                         {
+    // // assume the body is obstructed by the foreground but would fit in frame, 
+    // // so center it.  This is vulnerable to glitches if the body is too close.
+    //                             y_error = calculate_error(total_y, 
+    //                                 center_y);
+    //                         }
+            }
+    // other zones are visible but head is hidden.  Tilt up.
+            else
+            if(zones[NECK_ZONE].total > 0 ||
+                zones[HIP_ZONE].total > 0 ||
+                zones[FOOT_ZONE].total > 0)
+            {
+                y_error = -FROM_PERCENT_Y(lenses[lens].tilt_search);
             }
 
-        }
-        else
-// head is visible but feet are hidden.  Track the head.
-        if(zones[HEAD_ZONE].total > 0)
-        {
-// assume the body is too big to fit in frame, 
-// so track the minimum y of any head.
-//                        if(biggest_h > height / 2)
+    // apply the Y error to the servo
+            if(abs(y_error) > FROM_PERCENT_Y(lenses[lens].deadband))
             {
-                y_error = calculate_error(zones[HEAD_ZONE].min_y, 
-                    top_y);
+                tilt_change = delta * 
+                    lenses[lens].y_gain * 
+                    TO_PERCENT_Y(y_error);
+                CLAMP(tilt_change, 
+                    -lenses[lens].max_tilt_change, 
+                    lenses[lens].max_tilt_change);
+                tilt -= tilt_change * tilt_sign;
             }
-//                         else
-//                         {
-// // assume the body is obstructed by the foreground but would fit in frame, 
-// // so center it.  This is vulnerable to glitches if the body is too close.
-//                             y_error = calculate_error(total_y, 
-//                                 center_y);
-//                         }
-        }
-// other zones are visible but head is hidden.  Tilt up.
-        else
-        if(zones[NECK_ZONE].total > 0 ||
-            zones[HIP_ZONE].total > 0 ||
-            zones[FOOT_ZONE].total > 0)
-        {
-            y_error = -FROM_PERCENT_Y(lenses[lens].tilt_search);
-        }
-
-// apply the Y error to the servo
-        if(abs(y_error) > FROM_PERCENT_Y(lenses[lens].deadband))
-        {
-            tilt_change = delta * 
-                lenses[lens].y_gain * 
-                TO_PERCENT_Y(y_error);
-            CLAMP(tilt_change, 
-                -lenses[lens].max_tilt_change, 
-                lenses[lens].max_tilt_change);
-            tilt -= tilt_change * tilt_sign;
-        }
 #endif // TRACK_TILT
+        } // !is_truck
 
 //printf("pan_change=%d tilt_change=%d\n", (int)pan_change, (int)tilt_change);
 //    printf("pan=%d tilt=%d\n", (int)(pan - start_pan), (int)(tilt - start_tilt));
@@ -1556,45 +1097,313 @@ void do_feedback(double delta,
     }
 }
 
+int probe_usb(uint32_t vid, uint32_t pid)
+{
+	struct libusb_device_handle *devh = libusb_open_device_with_vid_pid(0, vid, pid);
+	if(devh)
+	{
+		libusb_close(devh);
+		return 1;
+	}
+    return 0;
+}
+
+#define CLEAR_CAM_ERRORS \
+error_flags &= ~(CAM_ENUM_ERROR | DEV_VIDEO_ERROR | CAM_STARTING_ERROR | VIDEO_IOCTL_ERROR);
+
+// probe for the video device
+int open_hdmi(int verbose)
+{
+    std::vector<char*> paths;
+    char string[TEXTLEN];
+    FILE *fd;
+    int got_usb = 0;
+
+// may have USB without paths or paths with broken USB probing.
+// discover the USB devices
+//     libusb_device **devs;
+//     int total = libusb_get_device_list(0, &devs);
+//     for(int i = 0; i < total; i++)
+//     {
+//         libusb_device_descriptor desc;
+//         libusb_get_device_descriptor(devs[i], &desc);
+//         printf("open_hdmi %d %04x %04x\n", 
+//             __LINE__, 
+//             desc.idVendor, 
+//             desc.idProduct);
+//         if(desc.idVendor == WEBCAM_VID1 && desc.idProduct == WEBCAM_PID1 ||
+//             desc.idVendor == WEBCAM_VID2 && desc.idProduct == WEBCAM_PID2 ||
+//             desc.idVendor == HDMI_VID && desc.idProduct == HDMI_PID)
+//         {
+//             got_usb = 1;
+//             break;
+//         }
+//     }
+//     libusb_free_device_list(devs, 1);
+
+// may fail this while having /dev/video
+    if(probe_usb(WEBCAM_VID1, WEBCAM_PID1) ||
+        probe_usb(WEBCAM_VID2, WEBCAM_PID2) ||
+        probe_usb(HDMI_VID, HDMI_PID))
+    {
+        got_usb = 1;
+    }
+
+
+
+// hangs
+//     fd = popen("lsusb", "r");
+//     while(!feof(fd))
+//     {
+//         char *result = fgets(string, TEXTLEN, fd);
+//         if(!result)
+//         {
+//             break;
+//         }
+//         if(strstr(result, WEBCAM_ID1) ||
+//             strstr(result, WEBCAM_ID2) ||
+//             strstr(result, HDMI_ID))
+//         {
+//             got_usb = 1;
+//             break;
+//         }
+//     }
+//     fclose(fd);
+
+// discover the paths
+    fd = popen("ls /dev/video*", "r");
+    while(!feof(fd))
+    {
+        char *result = fgets(string, TEXTLEN, fd);
+        if(!result)
+        {
+            break;
+        }
+// strip the newlines
+        while(strlen(result) > 1 &&
+            result[strlen(result) - 1] == '\n')
+        {
+            result[strlen(result) - 1] = 0;
+        }
+        paths.push_back(strdup(result));
+    }
+    fclose(fd);
+
+    if(paths.size() == 0)
+    {
+        if(!got_usb)
+        {
+            printf("open_hdmi %d: no USB device\n", __LINE__);
+            CLEAR_CAM_ERRORS
+            error_flags |= CAM_ENUM_ERROR;
+            send_error();
+            sleep(1);
+            return -1;
+        }
+        else
+        if((error_flags & CAM_ENUM_ERROR))
+        {
+            printf("open_hdmi %d: USB device found\n", __LINE__);
+            CLEAR_CAM_ERRORS
+            send_error();
+        }
+
+
+        printf("open_hdmi %d: no video device\n", __LINE__);
+        CLEAR_CAM_ERRORS
+        error_flags |= DEV_VIDEO_ERROR;
+        send_error();
+        sleep(1);
+        return -1;
+    }
+    else
+    {
+        printf("open_hdmi %d: video device found\n", __LINE__);
+        CLEAR_CAM_ERRORS
+        send_error();
+    }
+
+    int fd2 = -1;
+    for(int i = 0; i < paths.size(); i++)
+    {
+        printf("open_hdmi %d: opening %s\n", __LINE__, paths.at(i));
+        CLEAR_CAM_ERRORS
+        error_flags |= CAM_STARTING_ERROR;
+        send_error();
+
+
+        fd2 = open(paths.at(i), O_RDWR);
+        if(fd2 < 0)
+        {
+            continue;
+        }
+
+        struct v4l2_buffer buffer;
+        struct v4l2_requestbuffers requestbuffers;
+        requestbuffers.count = VIDEO_BUFFERS;
+        requestbuffers.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        requestbuffers.memory = V4L2_MEMORY_MMAP;
+        if(ioctl(fd2, VIDIOC_REQBUFS, &requestbuffers) < 0)
+        {
+            printf("open_hdmi %d: VIDIOC_REQBUFS failed\n",
+                __LINE__);
+            close(fd2);
+            fd2 = -1;
+        }
+        else
+        {
+            for(int j = 0; j < VIDEO_BUFFERS; j++)
+            {
+                buffer.type = requestbuffers.type;
+                buffer.index = j;
+
+                if(ioctl(fd2, VIDIOC_QUERYBUF, &buffer) < 0)
+				{
+					printf("open_hdmi %d: VIDIOC_QUERYBUF failed\n",
+                        __LINE__);
+                    close(fd2);
+                    fd2 = -1;
+                    break;
+				}
+                else
+                {
+                    mmap_buffer[j] = (unsigned char*)mmap(NULL,
+					    buffer.length,
+					    PROT_READ | PROT_WRITE,
+					    MAP_SHARED,
+					    fd2,
+					    buffer.m.offset);
+                    printf("open_hdmi %d: allocated buffer size=%d\n",
+                        __LINE__,
+                        buffer.length);
+                    if(ioctl(fd2, VIDIOC_QBUF, &buffer) < 0)
+                    {
+                        printf("open_hdmi %d: VIDIOC_QBUF failed\n",
+                            __LINE__);
+                        close(fd2);
+                        fd2 = -1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if(fd2 >= 0)
+        {
+            int streamon_arg = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            printf("open_hdmi %d: starting\n", __LINE__);
+	        if(ioctl(fd2, VIDIOC_STREAMON, &streamon_arg) < 0)
+            {
+		        printf("open_hdmi %d: VIDIOC_STREAMON failed\n",
+                    __LINE__);
+                for(int j = 0; j < VIDEO_BUFFERS; j++)
+                {
+                    munmap(mmap_buffer[j], buffer.length);
+                }
+                close(fd2);
+                fd2 = -1;
+            }
+        }
+        break;
+    }
+
+
+// delete the paths
+    while(paths.size() > 0)
+    {
+        free(paths.back());
+        paths.pop_back();
+    }
+
+
+    if(fd2 < 0)
+    {
+        printf("do_tracker %d: open/config error\n", __LINE__);
+        CLEAR_CAM_ERRORS
+        error_flags |= VIDEO_IOCTL_ERROR;
+        send_error();
+        sleep(1);
+        return -1;
+    }
+    else
+    {
+        printf("do_tracker %d: video configured\n", __LINE__);
+        CLEAR_CAM_ERRORS
+        send_error();
+    }
+
+    return fd2;
+}
+
+
+static int compare_height(const void *ptr1, const void *ptr2)
+{
+    body_t *item1 = (body_t*)ptr1;
+    body_t *item2 = (body_t*)ptr2;
+    return item1->y1 > item2->y1;
+}
 
 void do_tracker()
 {
     cudaSetDevice(0);
 
-    landscape_engine.load(ENGINE_LANDSCAPE, CAM_W, CAM_H);
-    portrait_engine.load(ENGINE_PORTRAIT, CAM_H, CAM_H * 3 / 2);
+    landscape_engine.load(ENGINE_LANDSCAPE, 
+        CAM_W, 
+        CAM_H, 
+        input_w, 
+        input_h);
+
+    if(!is_truck)
+        portrait_engine.load(ENGINE_PORTRAIT, 
+            CAM_H, 
+            CAM_H * 3 / 2, 
+            input_w, 
+            input_h);
 
 
 
 
-
-    for(int i = 0; i < INPUT_IMAGES; i++)
-    {
-        hdmi_image[i] = new uint8_t[HDMI_W * HDMI_H * 2];
-        hdmi_rows[i] = new uint8_t*[HDMI_H];
-        for(int j = 0; j < HDMI_H; j++)
-        {
-            hdmi_rows[i][j] = hdmi_image[i] + j * HDMI_W * 2;
-        }
-    }
 
 // YUV to RGB conversion from guicast
     cmodel_init();
 
-#ifndef RAW_HDMI
-// scaling table
-    int x_lookup[INPUT_W];
-    for(int i = 0; i < INPUT_W; i++)
-        x_lookup[i] = i * HDMI_W / CAM_W * 3;
-// destination for JPEG decompression
-    hdmi_image = new uint8_t[HDMI_W * 3 * HDMI_H];
-    hdmi_rows = new uint8_t*[HDMI_H];
-    for(int i = 0; i < HDMI_H; i++)
+    if(is_truck)
     {
-        hdmi_rows[i] = hdmi_image + HDMI_W * i * 3;
+// YUV planar 1280x720 from JPEGs
+        for(int i = 0; i < INPUT_IMAGES; i++)
+        {
+            hdmi_image[i] = new uint8_t[input_w * input_h * 3 / 2];
+        }
     }
-#endif // !RAW_HDMI
+    else
+    {
+    #ifdef RAW_HDMI
+    // YUV packed 640x480 direct from the HDMI converter
+        for(int i = 0; i < INPUT_IMAGES; i++)
+        {
+            hdmi_image[i] = new uint8_t[input_w * input_h * 2];
+            hdmi_rows[i] = new uint8_t*[input_h];
+            for(int j = 0; j < input_h; j++)
+            {
+                hdmi_rows[i][j] = hdmi_image[i] + j * input_w * 2;
+            }
+        }
 
+    #else // RAW_HDMI
+    // RGB 1920x1080 from JPEGs
+    // scaling table
+        int x_lookup[INPUT_W];
+        for(int i = 0; i < INPUT_W; i++)
+            x_lookup[i] = i * HDMI_W / CAM_W * 3;
+    // destination for JPEG decompression
+        hdmi_image = new uint8_t[HDMI_W * 3 * HDMI_H];
+        hdmi_rows = new uint8_t*[HDMI_H];
+        for(int i = 0; i < HDMI_H; i++)
+        {
+            hdmi_rows[i] = hdmi_image + HDMI_W * i * 3;
+        }
+    #endif // !RAW_HDMI
+    }
 
 
     float fps = 0;
@@ -1605,145 +1414,44 @@ void do_tracker()
     int frame_count = 0;
 
     int current_device = DEVICE0;
-    int fd = -1;
-    unsigned char *mmap_buffer[VIDEO_BUFFERS];
+    int cam_fd = -1;
 
+    int verbose = 1;
     while(1)
     {
-        if(fd < 0)
+        if(cam_fd < 0)
         {
-            char string[TEXTLEN];
-            sprintf(string, "/dev/video%d", current_device);
-            printf("do_tracker %d opening %s\n", 
-                __LINE__, 
-                string);
-
-            fd = open(string, O_RDWR);
-            if(fd < 0)
-            {
-                if(!(error_flags & VIDEO_DEVICE_ERROR))
-                {
-                    printf("do_tracker %d: failed to open %s\n",
-                        __LINE__,
-                        string);
-                    error_flags |= VIDEO_DEVICE_ERROR;
-                    send_error();
-                }
-                sleep(1);
-                current_device++;
-                if(current_device > DEVICE1)
-                    current_device = 0;
-            }
-            else
-            {
-                printf("do_tracker %d: opened %s\n",
-                    __LINE__,
-                    string);
-                if((error_flags & VIDEO_DEVICE_ERROR))
-                {
-                    error_flags &= ~VIDEO_DEVICE_ERROR;
-                    send_error();
-                }
-
-                struct v4l2_format v4l2_params;
-                v4l2_params.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-                ioctl(fd, VIDIOC_G_FMT, &v4l2_params);
-
-                v4l2_params.fmt.pix.width = HDMI_W;
-                v4l2_params.fmt.pix.height = HDMI_H;
-
-#ifndef RAW_HDMI
-                v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
-#else
-                v4l2_params.fmt.pix.pixelformat = V4L2_PIX_FMT_YUYV;
-#endif
-                if(ioctl(fd, VIDIOC_S_FMT, &v4l2_params) < 0)
-                {
-                    printf("do_tracker %d: VIDIOC_S_FMT failed\n",
-                        __LINE__);
-                }
-
-
-                struct v4l2_requestbuffers requestbuffers;
-                requestbuffers.count = VIDEO_BUFFERS;
-                requestbuffers.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-                requestbuffers.memory = V4L2_MEMORY_MMAP;
-                if(ioctl(fd, VIDIOC_REQBUFS, &requestbuffers) < 0)
-                {
-                    printf("do_tracker %d: VIDIOC_REQBUFS failed\n",
-                        __LINE__);
-                }
-                else
-                {
-                    for(int i = 0; i < VIDEO_BUFFERS; i++)
-                    {
-                        struct v4l2_buffer buffer;
-                        buffer.type = requestbuffers.type;
-                        buffer.index = i;
-
-                        if(ioctl(fd, VIDIOC_QUERYBUF, &buffer) < 0)
-				        {
-					        printf("do_tracker %d: VIDIOC_QUERYBUF failed\n",
-                                __LINE__);
-				        }
-                        else
-                        {
-                            mmap_buffer[i] = (unsigned char*)mmap(NULL,
-					            buffer.length,
-					            PROT_READ | PROT_WRITE,
-					            MAP_SHARED,
-					            fd,
-					            buffer.m.offset);
-                            printf("do_tracker %d: allocated buffer size=%d\n",
-                                __LINE__,
-                                buffer.length);
-                            if(ioctl(fd, VIDIOC_QBUF, &buffer) < 0)
-                            {
-                                printf("do_tracker %d: VIDIOC_QBUF failed\n",
-                                    __LINE__);
-                            }
-                        }
-                    }
-                }
-
-                int streamon_arg = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-	            if(ioctl(fd, VIDIOC_STREAMON, &streamon_arg) < 0)
-                {
-		            printf("do_tracker %d: VIDIOC_STREAMON failed\n",
-                        __LINE__);
-                }
-            }
+            cam_fd = open_hdmi(verbose);
         }
-        
-        
-        
-        if(fd >= 0)
+
+        if(cam_fd >= 0)
         {
             struct v4l2_buffer buffer;
 		    bzero(&buffer, sizeof(buffer));
             buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 		    buffer.memory = V4L2_MEMORY_MMAP;
-            if(ioctl(fd, VIDIOC_DQBUF, &buffer) < 0)
+            if(ioctl(cam_fd, VIDIOC_DQBUF, &buffer) < 0)
             {
                 printf("do_tracker %d: VIDIOC_DQBUF failed\n",
                     __LINE__);
-                if((error_flags & VIDEO_BUFFER_ERROR) == 0)
+                if((error_flags & VIDEO_IOCTL_ERROR) == 0)
                 {
-                    error_flags |= VIDEO_BUFFER_ERROR;
+                    error_flags |= VIDEO_IOCTL_ERROR;
                     send_error();
                 }
-                close(fd);
-                fd = -1;
+                close(cam_fd);
+                cam_fd = -1;
                 sleep(1);
             }
             else
             {
-                if((error_flags & VIDEO_BUFFER_ERROR))
+                if((error_flags & VIDEO_IOCTL_ERROR))
                 {
-                    error_flags &= ~VIDEO_BUFFER_ERROR;
+                    printf("do_tracker %d: VIDIOC_DQBUF success\n",
+                        __LINE__);
+                    error_flags &= ~VIDEO_IOCTL_ERROR;
                     send_error();
                 }
-
 // printf("do_tracker %d picture_size=%d picture_data=%p %02x %02x %02x %02x %02x %02x %02x %02x\n", 
 // __LINE__, 
 // buffer.bytesused, 
@@ -1760,39 +1468,189 @@ void do_tracker()
 // fwrite(mmap_buffer[buffer.index], 1, buffer.bytesused, fd);
 // fclose(fd);
 
-#ifndef RAW_HDMI
-                decompress_jpeg(mmap_buffer[buffer.index], buffer.bytesused);
-// release the buffer
-                ioctl(fd, VIDIOC_QBUF, &buffer);
-// scale the HDMI image to the INPUT size
-                for(int i = 0; i < INPUT_H; i++)
+                if(is_truck)
                 {
-                    uint8_t *dst = input_rows_l[current_input][i];
-                    uint8_t *src = hdmi_rows[i * HDMI_H / INPUT_H];
-                    for(int j = 0; j < INPUT_W; j++)
-                    {
-                        uint8_t *src2 = src + x_lookup[j];
-                        *dst++ = *src2++;
-                        *dst++ = *src2++;
-                        *dst++ = *src2++;
-                    }
-                }
-#else // !RAW_HDMI
+// always JPEG
+                    int decoded_w;
+                    int decoded_h;
+                    decompress_jpeg_yuv(mmap_buffer[buffer.index], 
+                        buffer.bytesused,
+                        &decoded_w,
+                        &decoded_h,
+                        hdmi_image[current_input]);
 
-                memcpy(hdmi_image[current_input], 
-                    mmap_buffer[buffer.index], 
-                    HDMI_W * HDMI_H * 2);
+// these have to be reset for every frame
+// reset saturation
+                    struct v4l2_control ctrl_arg;
+                    ctrl_arg.id = 0x980902;
+                    ctrl_arg.value = 127;
+                    ioctl(cam_fd, VIDIOC_S_CTRL, &ctrl_arg);
+// reset backlight compensation
+                    ctrl_arg.id = 0x98091c;
+                    ctrl_arg.value = 0;
+                    ioctl(cam_fd, VIDIOC_S_CTRL, &ctrl_arg);
 // release the buffer
-                ioctl(fd, VIDIOC_QBUF, &buffer);
-#endif // RAW_HDMI
+                    ioctl(cam_fd, VIDIOC_QBUF, &buffer);
+                }
+                else
+                {
 
+                #ifndef RAW_HDMI
+                    decompress_jpeg(mmap_buffer[buffer.index], buffer.bytesused);
+    // release the buffer
+                    ioctl(fd, VIDIOC_QBUF, &buffer);
+    // scale the HDMI image to the INPUT size
+                    for(int i = 0; i < INPUT_H; i++)
+                    {
+                        uint8_t *dst = input_rows_l[current_input][i];
+                        uint8_t *src = hdmi_rows[i * HDMI_H / INPUT_H];
+                        for(int j = 0; j < INPUT_W; j++)
+                        {
+                            uint8_t *src2 = src + x_lookup[j];
+                            *dst++ = *src2++;
+                            *dst++ = *src2++;
+                            *dst++ = *src2++;
+                        }
+                    }
+                #else // !RAW_HDMI
+
+                    memcpy(hdmi_image[current_input], 
+                        mmap_buffer[buffer.index], 
+                        HDMI_W * HDMI_H * 2);
+    // release the buffer
+                    ioctl(cam_fd, VIDIOC_QBUF, &buffer);
+                #endif // RAW_HDMI
+                }
+
+
+
+// The pose tracking
                 Engine *engine;
-                if(landscape)
+                if(landscape || is_truck)
                     engine = &landscape_engine;
                 else
                     engine = &portrait_engine;
 
-                engine->process();
+                if(is_truck)
+                    engine->process(YUV_PLANAR, hdmi_image[current_input]);
+                else
+                {
+                #ifdef RAW_HDMI
+                    engine->process(YUV_PACKED, hdmi_image[current_input]);
+                #else
+                    engine->process(YUV_NONE, hdmi_image[current_input]);
+                #endif
+                }
+
+
+// sort by size
+                int orig_animals = engine->mPoseKeypoints.getSize(0);
+                for (int animal = 0; animal < orig_animals; animal++)
+                {
+                    const auto& bodyParts = engine->mPoseKeypoints.getSize(1);
+                    body_t *body = &bodies[animal];
+                    body->orig_animal = animal;
+
+// reset the zones
+                    for(int i = 0; i < TOTAL_ZONES; i++)
+                    {
+                        reset_zone(&body->zones[i], zone_parts[i]);
+                    }
+
+
+                    if(bodyParts >= BODY_PARTS)
+                    {
+            // get bounding box of all body parts for now
+                        int have_body_part = 0;
+                        for(int body_part = 0; body_part < BODY_PARTS; body_part++)
+                        {
+                            int x = (int)engine->mPoseKeypoints[{ animal, body_part, 0 }];
+                            int y = (int)engine->mPoseKeypoints[{ animal, body_part, 1 }];
+
+            // body part was detected
+                            if(x > 0 && y > 0)
+                            {
+            // initialize the coords
+                                if(!have_body_part)
+                                {
+                                    body->x1 = body->x2 = x;
+                                    body->y1 = body->y2 = y;
+                                    have_body_part = 1;
+                                }
+                                else
+                                {
+            // get extents of coords
+                                    if(body->x1 > x)
+                                    {
+                                        body->x1 = x;
+                                    }
+
+                                    if(body->x2 < x)
+                                    {
+                                        body->x2 = x;
+                                    }
+
+                                    if(body->y1 > y)
+                                    {
+                                        body->y1 = y;
+                                    }
+
+                                    if(body->y2 < y)
+                                    {
+                                        body->y2 = y;
+                                    }
+                                }
+
+
+            // update the zone this body part belongs to
+                                for(int i = 0; i < TOTAL_ZONES; i++)
+                                {
+                                    update_zone(&body->zones[i], body_part, x, y);
+                                }
+                            }
+                        }
+
+
+            // get the head size from the head zones
+                        if(body->zones[NECK_ZONE].total &&
+                            body->zones[HEAD_ZONE].total)
+                        {
+            // expand head by 1/3 since openpose only detects eyes
+            // assume the head is vertical
+                            int h = body->zones[NECK_ZONE].max_y -
+                                body->zones[HEAD_ZONE].min_y;
+                            body->y1 -= h / 2;
+                            body->zones[HEAD_ZONE].min_y -= h / 2;
+
+                            body->head_size = body->zones[NECK_ZONE].max_y -
+                                body->zones[HEAD_ZONE].min_y;
+                        }
+
+
+            // debug
+            //                     for(int i = 0; i < TOTAL_ZONES; i++)
+            //                     {
+            //                         if(body->zones[i].total)
+            //                         {
+            //                             printf("zone %d: y=%d-%d total=%d ", 
+            //                                 i,
+            //                                 body->zones[i].min_y, 
+            //                                 body->zones[i].max_y, 
+            //                                 body->zones[i].total);
+            //                         }
+            //                     }
+            //                     printf("\n");
+                    }
+                }
+
+                
+                
+                qsort(bodies, orig_animals, sizeof(body_t), compare_height);
+// for(int i = 0; i < orig_animals; i++)
+// {
+// printf("do_tracker %d i=%d y1=%d\n", __LINE__, i, bodies[i].y1);
+// }
+
 
 // draw the vijeo
 #ifndef USE_SERVER
@@ -1862,24 +1720,34 @@ void do_tracker()
 #else // !USE_SERVER
 
 
+// server is ready for data
                 if(current_input2 < 0)
                 {
 // send keypoints
                     int animals = engine->mPoseKeypoints.getSize(0);
-                    if(animals > MAX_HUMANS) animals = MAX_HUMANS;
 //printf("do_tracker %d animals=%d\n", __LINE__, animals);
+
+                    if(animals > MAX_ANIMALS) animals = MAX_ANIMALS;
+                    if(is_truck && animals > 1)
+                        animals = 1;
+                    
+                    
                     int offset = HEADER_SIZE;
                     int max_x = 0;
                     int max_y = 0;
+
+                    vijeo_buffer[offset++] = (int)(fps * 256) & 0xff;
+                    vijeo_buffer[offset++] = (int)fps;
 
                     vijeo_buffer[offset++] = animals;
                     vijeo_buffer[offset++] = 0;
                     for(int i = 0; i < animals; i++)
                     {
+                        int orig_index = bodies[i].orig_animal;
                         for(int j = 0; j < BODY_PARTS; j++)
                         {
-                            int x = (int)engine->mPoseKeypoints[{ i, j, 0 }];
-                            int y = (int)engine->mPoseKeypoints[{ i, j, 1 }];
+                            int x = (int)engine->mPoseKeypoints[{ orig_index, j, 0 }];
+                            int y = (int)engine->mPoseKeypoints[{ orig_index, j, 1 }];
                             vijeo_buffer[offset++] = x & 0xff;
                             vijeo_buffer[offset++] = (x >> 8) & 0xff;
                             vijeo_buffer[offset++] = y & 0xff;
@@ -1889,6 +1757,7 @@ void do_tracker()
                         }
                     }
                     send_vijeo(current_input, offset - HEADER_SIZE);
+// avoid a race condition by not toggling this if the server is busy
                     current_input = !current_input;
 // printf("do_tracker %d animals=%d max_x=%d max_y=%d\n", 
 // __LINE__, 
@@ -1930,6 +1799,12 @@ void do_tracker()
                         engine->cam_w,
                         engine->cam_h);
                 }
+                else
+                if(is_truck && adc != ADC_CENTER)
+                {
+                    adc = ADC_CENTER;
+                    write_servos(0);
+                }
             }
         }
     }
@@ -1938,15 +1813,32 @@ void do_tracker()
 int main(int argc, char *argv[])
 {
     load_defaults();
+    dump_settings();
+    libusb_init(0);
+
+    if(is_truck)
+    {
+        input_w = TRUCK_W;
+        input_h = TRUCK_H;
+    }
+    else
+    {
+        input_w = HDMI_W;
+        input_h = HDMI_H;
+    }
+
 #ifdef USE_SERVER
     init_server();
 #else
     init_gui();
 #endif
+
     int result = init_servos();
+
 #ifndef USE_SERVER
     draw_startup();
 #endif // USE_SERVER
+
     do_tracker();
 }
 

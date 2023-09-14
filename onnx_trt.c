@@ -83,7 +83,7 @@ int main(int argc, char *argv[])
 
 	builder->setMaxBatchSize(1);
     auto config = std::unique_ptr<nvinfer1::IBuilderConfig>(builder->createBuilderConfig());
-    config->setMaxWorkspaceSize(1 << 30);
+    config->setMaxWorkspaceSize(2 << 30);
     config->setFlag(nvinfer1::BuilderFlag::kFP16);
 
     printf("optimizing model\n");

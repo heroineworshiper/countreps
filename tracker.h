@@ -1,6 +1,6 @@
 /*
- * tracking camera
- * Copyright (C) 2019-2021 Adam Williams <broadcast at earthling dot net>
+ * 2 axis tracking camera
+ * Copyright (C) 2019-2023 Adam Williams <broadcast at earthling dot net>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -49,6 +49,11 @@
     #define HDMI_H 1080
 #endif
 
+// truck webcam
+#define TRUCK_W 1280
+#define TRUCK_H 720
+
+
 // preview on server & dimensions of keypoints
 #define CAM_W 640
 #define CAM_H 360
@@ -79,7 +84,6 @@
 #endif
 
 #define TEXTLEN 1024
-#define BODY_PARTS 25
 // tilt tracking is optional
 #define TRACK_TILT
 
@@ -108,14 +112,29 @@ extern int tilt_sign;
 extern int lens;
 extern int landscape;
 extern int current_operation;
+extern int input_w;
+extern int input_h;
+
+// truck values
+extern int is_truck;
+extern int deadband;
+extern int speed;
 
 // error bits
-#define VIDEO_DEVICE_ERROR 1
-#define VIDEO_BUFFER_ERROR 2
+// /dev/video* doesn't exist
+#define DEV_VIDEO_ERROR 1
+// open, ioctl failed
+#define VIDEO_IOCTL_ERROR 2
+// servos not detected
 #define SERVO_ERROR 4
+// camera USB not enumerating
+#define CAM_ENUM_ERROR 8
+// camera is starting
+#define CAM_STARTING_ERROR 16
 extern uint8_t error_flags;
 
 #define INPUT_IMAGES 2
+extern uint8_t *hdmi_image[INPUT_IMAGES];
 extern uint8_t **hdmi_rows[INPUT_IMAGES];
 
 
@@ -186,6 +205,7 @@ void draw_startup();
 void draw_config();
 void init_gui();
 void save_defaults();
+void dump_settings();
 void write_servos(int use_pwm_limits);
 void stop_servos();
 void send_vijeo(int current_input, int keypoint_size);

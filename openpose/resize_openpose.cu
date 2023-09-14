@@ -76,6 +76,7 @@ __global__ void resizeNormKernel_openpose(uchar3* src,
 #define U_TO_B    1.77200
 
 
+// packed
 __device__ float3 getYUV(uchar1* src, 
     int x, 
     int y, 
@@ -96,6 +97,28 @@ __device__ float3 getYUV(uchar1* src,
     return rgb;
 }
 
+// planar
+__device__ float3 getYUV2(uchar1* src, 
+    int x, 
+    int y, 
+    int w, 
+    int h) 
+{
+//	if (x < 0 || x >= w || y < 0 || y >= h) return make_float3(0.0, 0.0, 0.0);
+    float3 yuv;
+    int offset_uv = (y / 2) * (w / 2) + x / 2;
+	yuv.x = float(src[y * w + x].x) / 255;
+    yuv.y = float(src[w * h + offset_uv].x) / 255 - 0.5;
+    yuv.z = float(src[w * h + w * h / 4 + offset_uv].x) / 255 - 0.5;
+
+    float3 rgb;
+	rgb.x = yuv.x + V_TO_R * yuv.z;
+	rgb.y = yuv.x + U_TO_G * yuv.y + V_TO_G * yuv.z;
+	rgb.z = yuv.x + U_TO_B * yuv.y;
+    return rgb;
+}
+
+// packed
 __global__ void resizeNormKernel_landscape(uchar1* src, 
     float *dst, 
     int dstW, 
@@ -136,6 +159,48 @@ __global__ void resizeNormKernel_landscape(uchar1* src,
     dst[stride * 2 + y * dstW + x] = b;
 }
 
+// planar
+__global__ void resizeNormKernel_landscape2(uchar1* src, 
+    float *dst, 
+    int dstW, 
+    int dstH, 
+    int srcW, 
+    int srcH,
+	float scaleX, 
+    float scaleY)
+{
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	const int x = idx % dstW;
+	int y = idx / dstW;
+	if (x >= dstW || y >= dstH)
+		return;
+	float w = (x + 0.5) * scaleX - 0.5;
+	float h = (y + 0.5) * scaleY - 0.5;
+	int h_low = (int)h;
+	int w_low = (int)w;
+	int h_high = h_low + 1;
+	int w_high = w_low + 1;
+	float lh = h - h_low;
+	float lw = w - w_low;
+	float hh = 1.0 - lh, hw = 1.0 - lw;
+	float w1 = hh * hw, w2 = hh * lw, w3 = lh * hw, w4 = lh * lw;
+	float3 v1 = getYUV2(src, w_low, h_low, srcW, srcH);
+	float3 v2 = getYUV2(src, w_high, h_low, srcW, srcH);
+	float3 v3 = getYUV2(src, w_low, h_high, srcW, srcH);
+	float3 v4 = getYUV2(src, w_high, h_high, srcW, srcH);
+	int stride = dstW * dstH;
+
+	float r = w1 * v1.x + w2 * v2.x + w3 * v3.x + w4 * v4.x;
+	float g = w1 * v1.y + w2 * v2.y + w3 * v3.y + w4 * v4.y;
+	float b = w1 * v1.z + w2 * v2.z + w3 * v3.z + w4 * v4.z;
+
+
+    dst[y*dstW + x] = r;
+    dst[stride + y * dstW + x] = g;
+    dst[stride * 2 + y * dstW + x] = b;
+}
+
+// packed
 __global__ void resizeNormKernel_portrait(uchar1* src, 
     float *dst, 
     int dstW, 
@@ -225,6 +290,32 @@ int resizeAndNorm_yuv(void *src,
 
 
 //printf("resizeAndNorm %d %f %f %f %f\n", __LINE__, scaleX, scaleY, shiftX, shiftY);
+	return 0;
+}
+
+
+int resizeAndNorm_yuv_planar(void *src, 
+    float *dst, 
+    int src_w, 
+    int src_h, 
+    int dst_w, 
+    int dst_h, 
+    cudaStream_t stream) 
+{
+	float scaleX;
+	float scaleY;
+	float shiftX = 0.f;
+    float shiftY = 0.f;
+
+	const int n = dst_w * dst_h;
+	int blockSize = 512;
+	const int gridSize = (n + blockSize - 1) / blockSize;
+
+    scaleX = src_w * 1.0f / dst_w;
+	scaleY = src_h * 1.0f / dst_h;
+    resizeNormKernel_landscape2 << <gridSize, blockSize, 0, stream >> > ((uchar1*)(src), dst, dst_w, dst_h, src_w, src_h, scaleX, scaleY);
+
+
 	return 0;
 }
 

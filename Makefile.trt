@@ -20,7 +20,9 @@ COUNTREPS_OBJS := \
 
 
 TRACKER_OBJS := \
+    body25.o \
     irlib.o \
+    trackerlib.o \
     tracker_trt.o \
     trackerserver.o
 
@@ -48,7 +50,8 @@ CFLAGS := \
     -I$(CUDA_INC) \
     -Iopenpose \
     -I$(OPENCV_INC) \
-    -I/usr/include/freetype2
+    -I/usr/include/freetype2 \
+    -I/usr/include/libusb-1.0
 
 NVCFLAGS := \
     -I$(OPENCV_INC)
@@ -72,6 +75,7 @@ LFLAGS := \
     -lXv \
     -lpng \
     -lfreetype \
+    -lusb-1.0 \
     $(CUDA_LIBS) \
     `pkg-config opencv4 --libs`
 
@@ -109,12 +113,14 @@ openpose/bodyPartConnectorBase.o: openpose/bodyPartConnectorBase.cu
 
 
 #trt_engine.o: trt_engine.c
+body25.o: body25.c
 countreps_trt.o: countreps_trt.c
 tracker_trt.o: tracker_trt.c
 trackerx11.o: trackerx11.c
 trackerserver.o: trackerserver.c
 gui.o: gui.c
 irlib.o: irlib.c
+trackerlib.o: trackerlib.c
 Openpose.o: Openpose.cpp
 parse/find_peaks.o: parse/find_peaks.cpp
 parse/refine_peaks.o:    parse/refine_peaks.cpp

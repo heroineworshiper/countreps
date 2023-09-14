@@ -38,6 +38,7 @@
 #include <sys/wait.h>
 #include <pthread.h>
 #include "tracker.h"
+#include "trackerlib.h"
 #include "jpeglib.h"
 #include <setjmp.h>
 
@@ -190,53 +191,103 @@ void compress_jpeg()
 	dest->pub.empty_output_buffer = empty_vijeo_buffer;
 	dest->pub.term_destination = term_destination;
 
-    int mcu_h = (int)(CAM_H / 16) * 16;
-    if(mcu_h < CAM_H) mcu_h += 16;
+// picture height rounded to macroblock boundary
+    int encoded_h = (int)(CAM_H / MCU_H) * MCU_H;
+    if(encoded_h < CAM_H) encoded_h += MCU_H;
 
     unsigned char **mcu_rows[3];
-    mcu_rows[0] = new uint8_t*[mcu_h];
-    mcu_rows[1] = new uint8_t*[mcu_h / 2];
-    mcu_rows[2] = new uint8_t*[mcu_h / 2];
+    mcu_rows[0] = new uint8_t*[encoded_h];
+    mcu_rows[1] = new uint8_t*[encoded_h / 2];
+    mcu_rows[2] = new uint8_t*[encoded_h / 2];
 
-// pack Y with height scaling
-    for(int i = 0; i < CAM_H; i++)
+
+// Webcam: scale X & Y
+    if(is_truck)
     {
-        uint8_t *src = hdmi_rows[current_input2][i * HDMI_H / CAM_H];
-        uint8_t *dst;
-        mcu_rows[0][i] = dst = new uint8_t[CAM_W];
-        for(int j = 0; j < CAM_W; j++)
+        int x_lookup[CAM_W];
+        for(int i = 0; i < CAM_W; i++)
+            x_lookup[i] = i * input_w / CAM_W;
+
+// pack Y
+        for(int i = 0; i < CAM_H; i++)
         {
-            *dst++ = src[0];
-            src += 2;
+            int in_y = i * input_h / CAM_H;
+            uint8_t *src = hdmi_image[current_input2] + input_w * in_y;
+            uint8_t *dst;
+            mcu_rows[0][i] = dst = new uint8_t[CAM_W];
+            for(int j = 0; j < CAM_W; j++)
+            {
+                *dst++ = src[x_lookup[j]];
+            }
+        }
+
+
+// pack UV
+        for(int i = 0; i < CAM_H / 2; i++)
+        {
+            int in_y = (i * 2) * input_h / CAM_H;
+            uint8_t *src_u = hdmi_image[current_input2] + 
+                input_w * input_h + 
+                (input_w / 2) * (in_y / 2);
+            uint8_t *src_v = hdmi_image[current_input2] + 
+                input_w * input_h + 
+                input_w * input_h / 4 + 
+                (input_w / 2) * (in_y / 2);
+            uint8_t *dst_u;
+            uint8_t *dst_v;
+            mcu_rows[1][i] = dst_u = new uint8_t[CAM_W / 2];
+            mcu_rows[2][i] = dst_v = new uint8_t[CAM_W / 2];
+            for(int j = 0; j < CAM_W / 2; j++)
+            {
+                *dst_u++ = src_u[x_lookup[j * 2] / 2];
+                *dst_v++ = src_v[x_lookup[j * 2] / 2];
+            }
+        }
+        
+    }
+    else
+    { 
+// RAW_HDMI: assume the input is the same width as the output
+// pack Y with height scaling
+        for(int i = 0; i < CAM_H; i++)
+        {
+            uint8_t *src = hdmi_rows[current_input2][i * HDMI_H / CAM_H];
+            uint8_t *dst;
+            mcu_rows[0][i] = dst = new uint8_t[CAM_W];
+            for(int j = 0; j < CAM_W; j++)
+            {
+                *dst++ = src[0];
+                src += 2;
+            }
+        }
+
+// pack UV with height scaling
+        for(int i = 0; i < CAM_H / 2; i++)
+        {
+            uint8_t *src = hdmi_rows[current_input2][i * 2 * HDMI_H / CAM_H];
+            uint8_t *dst_u;
+            uint8_t *dst_v;
+            mcu_rows[1][i] = dst_u = new uint8_t[CAM_W / 2];
+            mcu_rows[2][i] = dst_v = new uint8_t[CAM_W / 2];
+            for(int j = 0; j < CAM_W / 2; j++)
+            {
+                *dst_u++ = src[1];
+                *dst_v++ = src[3];
+                src += 4;
+            }
         }
     }
 
 // pad Y
-    for(int i = CAM_H; i < mcu_h; i++)
+    for(int i = CAM_H; i < encoded_h; i++)
     {
         uint8_t *dst;
         mcu_rows[0][i] = dst = new uint8_t[CAM_W];
         memset(dst, 0, CAM_W);
     }
 
-// pack UV with height scaling
-    for(int i = 0; i < CAM_H / 2; i++)
-    {
-        uint8_t *src = hdmi_rows[current_input2][i * 2 * HDMI_H / CAM_H];
-        uint8_t *dst_u;
-        uint8_t *dst_v;
-        mcu_rows[1][i] = dst_u = new uint8_t[CAM_W / 2];
-        mcu_rows[2][i] = dst_v = new uint8_t[CAM_W / 2];
-        for(int j = 0; j < CAM_W / 2; j++)
-        {
-            *dst_u++ = src[1];
-            *dst_v++ = src[3];
-            src += 4;
-        }
-    }
-
 // pad UV
-    for(int i = CAM_H / 2; i < mcu_h / 2; i++)
+    for(int i = CAM_H / 2; i < encoded_h / 2; i++)
     {
         uint8_t *dst_u;
         uint8_t *dst_v;
@@ -247,34 +298,34 @@ void compress_jpeg()
     }
 
     jpeg_start_compress(&cinfo, TRUE);
+    uint8_t **mcu_rows2[3];
+    mcu_rows2[0] = new uint8_t*[MCU_H];
+    mcu_rows2[1] = new uint8_t*[MCU_H / 2];
+    mcu_rows2[2] = new uint8_t*[MCU_H / 2];
     while(cinfo.next_scanline < cinfo.image_height)
 	{
-        uint8_t **mcu_rows2[3];
-        mcu_rows2[0] = new uint8_t*[16];
-        mcu_rows2[1] = new uint8_t*[8];
-        mcu_rows2[2] = new uint8_t*[8];
-        for(int i = 0; i < 16; i++)
+        for(int i = 0; i < MCU_H; i++)
             mcu_rows2[0][i] = mcu_rows[0][cinfo.next_scanline + i];
-        for(int i = 0; i < 8; i++)
+        for(int i = 0; i < MCU_H / 2; i++)
         {
             mcu_rows2[1][i] = mcu_rows[1][cinfo.next_scanline / 2 + i];
             mcu_rows2[2][i] = mcu_rows[2][cinfo.next_scanline / 2 + i];
         }
         jpeg_write_raw_data(&cinfo,
             mcu_rows2,
-            16);
-        delete [] mcu_rows2[0];
-        delete [] mcu_rows2[1];
-        delete [] mcu_rows2[2];
+            MCU_H);
     }
+    delete [] mcu_rows2[0];
+    delete [] mcu_rows2[1];
+    delete [] mcu_rows2[2];
     jpeg_finish_compress(&cinfo);
     jpeg_destroy_compress(&cinfo);
 
-    for(int i = 0; i < mcu_h; i++)
+    for(int i = 0; i < encoded_h; i++)
     {
         delete [] mcu_rows[0][i];
     }
-    for(int i = 0; i < mcu_h / 2; i++)
+    for(int i = 0; i < encoded_h / 2; i++)
     {
         delete [] mcu_rows[1][i];
         delete [] mcu_rows[2][i];
@@ -314,6 +365,9 @@ void send_status()
     int offset = HEADER_SIZE;
     status_buffer[offset++] = current_operation;
     status_buffer[offset++] = 0;
+//     status_buffer[offset++] = is_truck;
+//     status_buffer[offset++] = deadband;
+//     status_buffer[offset++] = speed;
 
     int tmp = (int)pan;
     status_buffer[offset++] = tmp & 0xff;
@@ -351,7 +405,7 @@ void send_status()
 // wake up the writer
     sem_post(&data_ready);
             
-//    printf("send_status %d error_flags=%d\n", __LINE__, error_flags);
+printf("send_status %d error_flags=0x%x\n", __LINE__, error_flags);
 //    joinBodyParts(connection, STATUS, buffer, 23);
 }
 
@@ -385,6 +439,12 @@ void send_vijeo(int current_input, int keypoint_size)
 void* web_server_reader(void *ptr)
 {
 	unsigned char buffer[SOCKET_BUFSIZE];
+    
+#define GET_COMMAND 0
+#define GET_SETTINGS 1
+    int state = GET_COMMAND;
+    int counter = 0;
+    uint8_t packet[16];
 	while(1)
 	{
 //        int bytes_read = read(recv_socket, buffer, SOCKET_BUFSIZE);
@@ -418,143 +478,203 @@ void* web_server_reader(void *ptr)
         for(i = 0; i < bytes_read; i++)
         {
             int c = buffer[i];
-            printf("web_server_reader %d '%c'\n", __LINE__, buffer[i]);
+            
+            if(state == GET_COMMAND)
+            {
+                printf("web_server_reader %d '%c'\n", __LINE__, buffer[i]);
 
 // do everything GUI::keypress_event does
-            if(c == '*')
-            {
-                send_status();
-            }
-            else
-            if(current_operation == STARTUP)
-            {
-                if(c == ' ')
+                if(c == '*')
                 {
-                    current_operation = CONFIGURING;
-
                     send_status();
-
-                    do_startup();
                 }
-            }
-            else
-            if(current_operation == CONFIGURING)
-            {
-                int need_write_servos = 0;
-
-                switch(c)
+                else
+                if(current_operation == STARTUP)
                 {
-                    case 'q':
-                        stop_servos();
-                        ::save_defaults();
-                        current_operation = STARTUP;
-                        break;
+                    switch(c)
+                    {
+                        case ' ':
+                            if(is_truck)
+                            {
+                                current_operation = TRACKING;
+                                send_status();
+                            }
+                            else
+                            {
+                                current_operation = CONFIGURING;
+                                send_status();
+                                do_startup();
+                            }
+                            break;
+                        case 's':
+                            state = GET_SETTINGS;
+                            counter = 0;
+                            break;
+                        default:
+                            send_status();
+                            break;
+                    }
+                }
+                else
+                if(current_operation == CONFIGURING)
+                {
+                    int need_write_servos = 0;
 
-                    case '\n':
-                        ::save_defaults();
-                        current_operation = TRACKING;
-                        break;
-
-                    case 'w':
-                        tilt += lenses[lens].tilt_step * tilt_sign;
-                        start_pan = pan;
-                        start_tilt = tilt;
-                        need_write_servos = 1;
-                        break;
-
-                    case 's':
-                        tilt -= lenses[lens].tilt_step * tilt_sign;
-                        start_pan = pan;
-                        start_tilt = tilt;
-                        need_write_servos = 1;
-                        break;
-
-                    case 'a':
-                        pan -= lenses[lens].pan_step * pan_sign;
-                        start_pan = pan;
-                        start_tilt = tilt;
-                        need_write_servos = 1;
-                        break;
-
-                    case 'd':
-                        pan += lenses[lens].pan_step * pan_sign;
-                        start_pan = pan;
-                        start_tilt = tilt;
-                        need_write_servos = 1;
-                        break;
-
-                    case 'c':
-                        pan = start_pan;
-                        tilt = start_tilt;
-                        need_write_servos = 1;
-                        break;
-
-                    case 't':
-                        tilt_sign *= -1;
-                        ::save_defaults();
-                        break;
-
-                    case 'p':
-                        pan_sign *= -1;
-                        ::save_defaults();
-                        break;
-
-//                         case 'r':
-//                             landscape = !landscape;
-//                             ::save_defaults();
-//                             break;
-
-                    case 'r':
-                        if(!landscape)
-                        {
-                            landscape = 1;
+                    switch(c)
+                    {
+                        case 'q':
+                            stop_servos();
                             ::save_defaults();
-                        }
-                        break;
+                            current_operation = STARTUP;
+                            break;
 
-                    case 'R':
-                        if(landscape)
-                        {
-                            landscape = 0;
+                        case '\n':
                             ::save_defaults();
-                        }
-                        break;
+                            current_operation = TRACKING;
+                            break;
 
-                    case 'l':
-                        lens++;
-                        if(lens >= TOTAL_LENSES)
-                        {
-                            lens = 0;
-                        }
-                        ::save_defaults();
-                        break;
+                        case 'w':
+                            tilt += lenses[lens].tilt_step * tilt_sign;
+                            start_pan = pan;
+                            start_tilt = tilt;
+                            need_write_servos = 1;
+                            break;
+
+                        case 's':
+                            tilt -= lenses[lens].tilt_step * tilt_sign;
+                            start_pan = pan;
+                            start_tilt = tilt;
+                            need_write_servos = 1;
+                            break;
+
+                        case 'a':
+                            pan -= lenses[lens].pan_step * pan_sign;
+                            start_pan = pan;
+                            start_tilt = tilt;
+                            need_write_servos = 1;
+                            break;
+
+                        case 'd':
+                            pan += lenses[lens].pan_step * pan_sign;
+                            start_pan = pan;
+                            start_tilt = tilt;
+                            need_write_servos = 1;
+                            break;
+
+                        case 'c':
+                            pan = start_pan;
+                            tilt = start_tilt;
+                            need_write_servos = 1;
+                            break;
+
+                        case 't':
+                            tilt_sign *= -1;
+                            ::save_defaults();
+                            break;
+
+                        case 'p':
+                            pan_sign *= -1;
+                            ::save_defaults();
+                            break;
+
+    //                         case 'r':
+    //                             landscape = !landscape;
+    //                             ::save_defaults();
+    //                             break;
+
+                        case 'r':
+                            if(!landscape)
+                            {
+                                landscape = 1;
+                                ::save_defaults();
+                            }
+                            break;
+
+                        case 'R':
+                            if(landscape)
+                            {
+                                landscape = 0;
+                                ::save_defaults();
+                            }
+                            break;
+
+                        case 'l':
+                            lens++;
+                            if(lens >= TOTAL_LENSES)
+                            {
+                                lens = 0;
+                            }
+                            ::save_defaults();
+                            break;
+                    }
+
+                    if(need_write_servos)
+                    {
+                        write_servos(1);
+                    }
+                    send_status();
                 }
-
-                if(need_write_servos)
+                else
+                if(current_operation == TRACKING)
                 {
-                    write_servos(1);
+                    switch(c)
+                    {
+                        case 'Q':
+                            if(!is_truck) stop_servos();
+                            current_operation = STARTUP;
+                            send_status();
+                            break;
+
+                        case 'b':
+                            if(!is_truck) 
+                            {
+                                current_operation = CONFIGURING;
+                                send_status();
+                            }
+                            break;
+                        case 's':
+                            state = GET_SETTINGS;
+                            counter = 0;
+                            break;
+                    }
                 }
-                send_status();
-            }
+            } // state == GET_COMMAND
             else
-            if(current_operation == TRACKING)
             {
-                switch(c)
+                packet[counter++] = c;
+                if(counter >= 3)
                 {
-                    case 'Q':
-                        stop_servos();
-                        current_operation = STARTUP;
-                        send_status();
-                        break;
+                    state = GET_COMMAND;
+                    int changed = 0;
+                    if(packet[0] != 0xff && packet[0] != is_truck) 
+                    {
+                        is_truck = packet[0];
+                        changed = 1;
+                    }
+                    
+                    if(packet[1] != 0xff && packet[1] != deadband)
+                    {
+                        deadband = packet[1];
+                        changed = 1;
+                    }
+                    
+                    if(packet[2] != 0xff && packet[2] != speed) 
+                    {
+                        speed = packet[2];
+                        changed = 1;
+                    }
 
-                    case 'b':
-                        current_operation = CONFIGURING;
-                        send_status();
-                        break;
+                    if(changed) 
+                    {
+                        save_defaults();
+                        dump_settings();
+                    }
+                    send_status();
                 }
-            }
-        }
-    }
+                
+            } // state == GET_SETTINGS
+        } // i < bytes_read
+    } // 1
 }
 
 
@@ -569,9 +689,14 @@ void* web_server_writer(void *ptr)
         sem_wait(&data_ready);
 
 
-// no client
+// no client.  Release all the buffers
         if(send_socket < 0)
+        {
+            status_size = 0;
+            keypoint_size2 = 0;
+            current_input2 = -1;
             continue;
+        }
 
         if(status_size)
         {
