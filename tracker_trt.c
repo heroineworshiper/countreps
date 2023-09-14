@@ -54,6 +54,7 @@
 #include <sys/types.h>
 #include <termios.h>
 #include "tracker.h"
+#include "trackerlib.h"
 #include <unistd.h>
 
 #define ENGINE_PORTRAIT "body25_240x160.engine"
@@ -596,67 +597,6 @@ static FILE *ffmpeg_fd = 0;
 int current_operation = STARTUP;
 uint8_t error_flags = 0xff;
 
-int init_serial(const char *path)
-{
-	struct termios term;
-    int verbose = 0;
-
-	if(verbose) printf("init_serial %d: opening %s\n", __LINE__, path);
-
-// Initialize serial port
-	int fd = open(path, O_RDWR | O_NOCTTY | O_SYNC);
-	if(fd < 0)
-	{
-		if(verbose) printf("init_serial %d: path=%s: %s\n", __LINE__, path, strerror(errno));
-		return -1;
-	}
-	
-	if (tcgetattr(fd, &term))
-	{
-		if(verbose) printf("init_serial %d: path=%s %s\n", __LINE__, path, strerror(errno));
-		close(fd);
-		return -1;
-	}
-
-
-/*
- * printf("init_serial: %d path=%s iflag=0x%08x oflag=0x%08x cflag=0x%08x\n", 
- * __LINE__, 
- * path, 
- * term.c_iflag, 
- * term.c_oflag, 
- * term.c_cflag);
- */
-	tcflush(fd, TCIOFLUSH);
-	cfsetispeed(&term, B115200);
-	cfsetospeed(&term, B115200);
-//	term.c_iflag = IGNBRK;
-	term.c_iflag = 0;
-	term.c_oflag = 0;
-	term.c_lflag = 0;
-//	term.c_cflag &= ~(PARENB | PARODD | CRTSCTS | CSTOPB | CSIZE);
-//	term.c_cflag |= CS8;
-	term.c_cc[VTIME] = 1;
-	term.c_cc[VMIN] = 1;
-/*
- * printf("init_serial: %d path=%s iflag=0x%08x oflag=0x%08x cflag=0x%08x\n", 
- * __LINE__, 
- * path, 
- * term.c_iflag, 
- * term.c_oflag, 
- * term.c_cflag);
- */
-	if(tcsetattr(fd, TCSANOW, &term))
-	{
-		if(verbose) printf("init_serial %d: path=%s %s\n", __LINE__, path, strerror(errno));
-		close(fd);
-		return -1;
-	}
-
-	printf("init_serial %d: opened %s\n", __LINE__, path);
-	return fd;
-}
-
 
 void* servo_reader(void *ptr)
 {
@@ -1113,128 +1053,6 @@ void save_defaults()
 
 
 
-
-
-typedef struct 
-{
-	struct jpeg_source_mgr pub;	/* public fields */
-
-	JOCTET * buffer;		/* start of buffer */
-	int bytes;             /* total size of buffer */
-} jpeg_source_mgr_t;
-typedef jpeg_source_mgr_t* jpeg_src_ptr;
-
-
-struct my_jpeg_error_mgr {
-  struct jpeg_error_mgr pub;	/* "public" fields */
-  jmp_buf setjmp_buffer;	/* for return to caller */
-};
-
-static struct my_jpeg_error_mgr my_jpeg_error;
-
-METHODDEF(void) init_source(j_decompress_ptr cinfo)
-{
-    jpeg_src_ptr src = (jpeg_src_ptr) cinfo->src;
-}
-
-METHODDEF(boolean) fill_input_buffer(j_decompress_ptr cinfo)
-{
-	jpeg_src_ptr src = (jpeg_src_ptr) cinfo->src;
-#define   M_EOI     0xd9
-
-	src->buffer[0] = (JOCTET)0xFF;
-	src->buffer[1] = (JOCTET)M_EOI;
-	src->pub.next_input_byte = src->buffer;
-	src->pub.bytes_in_buffer = 2;
-
-	return TRUE;
-}
-
-
-METHODDEF(void) skip_input_data(j_decompress_ptr cinfo, long num_bytes)
-{
-	jpeg_src_ptr src = (jpeg_src_ptr)cinfo->src;
-
-	src->pub.next_input_byte += (size_t)num_bytes;
-	src->pub.bytes_in_buffer -= (size_t)num_bytes;
-}
-
-
-METHODDEF(void) term_source(j_decompress_ptr cinfo)
-{
-}
-
-METHODDEF(void) my_jpeg_output (j_common_ptr cinfo)
-{
-}
-
-
-METHODDEF(void) my_jpeg_error_exit (j_common_ptr cinfo)
-{
-/* cinfo->err really points to a mjpeg_error_mgr struct, so coerce pointer */
-  	struct my_jpeg_error_mgr* mjpegerr = (struct my_jpeg_error_mgr*) cinfo->err;
-
-printf("my_jpeg_error_exit %d\n", __LINE__);
-/* Always display the message. */
-/* We could postpone this until after returning, if we chose. */
-  	(*cinfo->err->output_message) (cinfo);
-
-/* Return control to the setjmp point */
-  	longjmp(mjpegerr->setjmp_buffer, 1);
-}
-
-
-
-void decompress_jpeg(uint8_t *picture_data, int picture_size)
-{
-    if(picture_data[0] != 0xff ||
-        picture_data[1] != 0xd8 ||
-        picture_data[2] != 0xff ||
-        picture_data[3] != 0xdb)
-        return;
-
-	struct jpeg_decompress_struct cinfo;
-	cinfo.err = jpeg_std_error(&(my_jpeg_error.pub));
-    my_jpeg_error.pub.error_exit = my_jpeg_error_exit;
-
-    my_jpeg_error.pub.output_message = my_jpeg_output;
-	jpeg_create_decompress(&cinfo);
-	if(setjmp(my_jpeg_error.setjmp_buffer))
-	{
-        jpeg_destroy_decompress(&cinfo);
-        return;
-    }
-	cinfo.src = (struct jpeg_source_mgr*)
-    	(*cinfo.mem->alloc_small)((j_common_ptr)&cinfo, 
-        JPOOL_PERMANENT,
-		sizeof(jpeg_source_mgr_t));
-	jpeg_src_ptr src = (jpeg_src_ptr)cinfo.src;
-	src->pub.init_source = init_source;
-	src->pub.fill_input_buffer = fill_input_buffer;
-	src->pub.skip_input_data = skip_input_data;
-	src->pub.resync_to_restart = jpeg_resync_to_restart; /* use default method */
-	src->pub.term_source = term_source;
-	src->pub.bytes_in_buffer = picture_size;
-	src->pub.next_input_byte = picture_data;
-	src->buffer = picture_data;
-	src->bytes = picture_size;
-
-	jpeg_read_header(&cinfo, 1);
-	jpeg_start_decompress(&cinfo);
-
-    decoded_w = cinfo.output_width;
-    decoded_h = cinfo.output_height;
-//printf("decompress_jpeg %d w=%d h=%d\n", __LINE__, decoded_w, decoded_h);
-
-	while(cinfo.output_scanline < decoded_h)
-	{
-		int num_scanlines = jpeg_read_scanlines(&cinfo, 
-			&hdmi_rows[current_input][cinfo.output_scanline],
-			decoded_h - cinfo.output_scanline);
-	}
-
-    jpeg_destroy_decompress(&cinfo);
-}
 
 void reset_zone(zone_t *zone, int *parts)
 {
@@ -1862,6 +1680,7 @@ void do_tracker()
 #else // !USE_SERVER
 
 
+// server is ready for data
                 if(current_input2 < 0)
                 {
 // send keypoints
@@ -1889,6 +1708,7 @@ void do_tracker()
                         }
                     }
                     send_vijeo(current_input, offset - HEADER_SIZE);
+// avoid a race condition by not toggling this if the server is busy
                     current_input = !current_input;
 // printf("do_tracker %d animals=%d max_x=%d max_y=%d\n", 
 // __LINE__, 
