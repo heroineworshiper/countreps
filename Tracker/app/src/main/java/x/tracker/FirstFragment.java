@@ -35,6 +35,7 @@ import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
+import java.util.Formatter;
 import java.util.Vector;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -54,6 +55,8 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     Bitmap videoBitmap;
     Canvas videoCanvas;
     ClientThread client;
+// in case frames come in faster than we can draw them
+    static boolean busy = false;
 
 // keypoints for the next frame
     static int animals = 0;
@@ -63,6 +66,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     static int[] keypoints = new int[MAX_ANIMALS * BODY_PARTS * 2];
 // screen coordinates
     static int[] keypoint_cache = new int[MAX_ANIMALS * BODY_PARTS * 2];
+    static float fps = 0;
 
 // the body parts as defined in
 // src/openpose/pose/poseParameters.cpp: POSE_BODY_25_BODY_PARTS
@@ -155,6 +159,8 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     final int VIDEO_DEVICE_ERROR = 1;
     final int VIDEO_BUFFER_ERROR = 2;
     final int SERVO_ERROR = 4;
+    final int CAM_ENUM_ERROR = 8;
+    final int CAM_STARTING_ERROR = 16;
 
     int errors;
 
@@ -171,8 +177,11 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     Text panText;
     Text tiltText;
     Text videoDeviceError;
-    Text videoBufferError;
+    Text videoIoctlError;
+    Text camStartingError;
     Text servoError;
+    Text usbError;
+    Text fpsText;
     static final int MARGIN = 40;
     static final int ARROW_MARGIN = 20;
     static final int TEXT_SIZE = 40;
@@ -345,6 +354,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                     drawGUI(canvas);
 
                     video.getHolder().unlockCanvasAndPost(canvas);
+                    busy = false;
                 }
             }
         });
@@ -354,8 +364,10 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     {
         boolean needRedraw = false;
         needRedraw |= videoDeviceError.setHidden((errors & VIDEO_DEVICE_ERROR) == 0);
-        needRedraw |= videoBufferError.setHidden((errors & VIDEO_BUFFER_ERROR) == 0);
+        needRedraw |= videoIoctlError.setHidden((errors & VIDEO_BUFFER_ERROR) == 0);
         needRedraw |= servoError.setHidden((errors & SERVO_ERROR) == 0);
+        needRedraw |= usbError.setHidden((errors & CAM_ENUM_ERROR) == 0);
+        needRedraw |= camStartingError.setHidden((errors & CAM_STARTING_ERROR) == 0);
         return needRedraw;
     }
 
@@ -428,30 +440,64 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                 y = size.height() / 2 + MARGIN;
             }
 
+            if(landscape)
+                fpsText = new Text(canvas.getWidth() - size.width() - MARGIN,
+                    MARGIN,
+                    "");
+            else
+                fpsText = new Text(MARGIN,
+                    MARGIN + size.height(),
+                    "");
 
-            videoDeviceError = new Text(x, y, "VIDEO DEVICE NOT FOUND");
+            usbError = new Text(x, y, "VIDEO USB NOT FOUND");
+            usbError.color = Color.RED;
+//             if(landscape) {
+//                 x += usbError.getW();
+//             }
+//             else
+//             {
+//                 y += usbError.getH();
+//             }
+
+            videoDeviceError = new Text(x, y, "/DEV/VIDEO* NOT FOUND");
             videoDeviceError.color = Color.RED;
+//             if(landscape) {
+//                 x += usbError.getW();
+//             }
+//             else
+//             {
+//                 y += usbError.getH();
+//             }
+
+            videoIoctlError = new Text(x, y, "VIDEO IOCTL FAILED");
+            videoIoctlError.color = Color.RED;
+//             if(landscape) {
+//                 x += usbError.getW();
+//             }
+//             else
+//             {
+//                 y += usbError.getH();
+//             }
+
+
+            camStartingError = new Text(x, y, "VIDEO STARTING");
+            camStartingError.color = Color.RED;
             if(landscape) {
-                x += canvas.getWidth() / 4;
+                x += usbError.getW();
             }
             else
             {
-                y += canvas.getHeight() / 8;
+                y += usbError.getH();
             }
-            videoBufferError = new Text(x, y, "VIDEO CAPTURE FAILED");
-            videoBufferError.color = Color.RED;
-            if(landscape) {
-                x += canvas.getWidth() / 4;
-            }
-            else
-            {
-                y += canvas.getHeight() / 8;
-            }
+
             servoError = new Text(x, y, "SERVO DEVICE NOT FOUND");
             servoError.color = Color.RED;
 
+            texts.add(fpsText);
+            texts.add(usbError);
             texts.add(videoDeviceError);
-            texts.add(videoBufferError);
+            texts.add(camStartingError);
+            texts.add(videoIoctlError);
             texts.add(servoError);
             updateErrors();
 
@@ -1041,6 +1087,11 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
             joinBodyParts(canvas, p, j, MODEL_SMALLTOE2, MODEL_BIGTOE2);
         }
 
+// update FPS
+        StringBuilder sb = new StringBuilder();
+        Formatter formatter = new Formatter(sb);
+        
+        if(fpsText != null) fpsText.updateText(formatter.format("%.02f", fps).toString());
 
         for (int i = 0; i < buttons.size(); i++)
         {

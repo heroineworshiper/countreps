@@ -266,41 +266,48 @@ class ClientThread implements Runnable {
                             {
                                 Log.i("ClientThread", "VIJEO size=" + dataSize);
 
-// extract keypoints
-                                int offset = 0;
-                                FirstFragment.animals = read_uint16(packet, offset);
-//                                 Log.i("ClientThread", 
-//                                     "KEYPOINTS size=" + dataSize +
-//                                     " animals=" + FirstFragment.animals);
-                                if(2 + FirstFragment.animals * FirstFragment.BODY_PARTS * 4 <= dataSize)
+                                if(!FirstFragment.busy)
                                 {
+                                    FirstFragment.busy = true;
+    // extract keypoints
+                                    int offset = 0;
+                                    int fpsTemp = read_uint16(packet, offset);
                                     offset += 2;
-                                    for(int j = 0; j < FirstFragment.animals * FirstFragment.BODY_PARTS * 2; j++)
+                                    FirstFragment.fps = (float)((int)fpsTemp / 256 + (float)(fpsTemp & 0xff) / 256);
+                                    FirstFragment.animals = read_uint16(packet, offset);
+    //                                 Log.i("ClientThread", 
+    //                                     "KEYPOINTS size=" + dataSize +
+    //                                     " animals=" + FirstFragment.animals);
+                                    if(2 + FirstFragment.animals * FirstFragment.BODY_PARTS * 4 <= dataSize)
                                     {
-                                        FirstFragment.keypoints[j] = read_uint16(packet, offset);
                                         offset += 2;
+                                        for(int j = 0; j < FirstFragment.animals * FirstFragment.BODY_PARTS * 2; j++)
+                                        {
+                                            FirstFragment.keypoints[j] = read_uint16(packet, offset);
+                                            offset += 2;
+                                        }
                                     }
-                                }
 
-// extract image
-                                ImageDecoder.Source imageSource =
-                                    ImageDecoder.createSource(
-                                        ByteBuffer.wrap(packet, offset, dataSize - offset));
-                                // generates a hardware bitmap
-                                Bitmap bitmap = null;
-                                try {
-                                    bitmap = ImageDecoder.decodeBitmap(imageSource);
-                                } catch (IOException e) {
-                                    e.printStackTrace();
-                                }
-                                
-//                                Log.i("ClientThread", "bitmap=" + bitmap);
-//                                                    Log.i("x", "VIJEO w=" + bitmap.getWidth() +
-//                                                            " h=" + bitmap.getHeight() +
-//                                                            " " + bitmap.getColorSpace());
+    // extract image
+                                    ImageDecoder.Source imageSource =
+                                        ImageDecoder.createSource(
+                                            ByteBuffer.wrap(packet, offset, dataSize - offset));
+                                    // generates a hardware bitmap
+                                    Bitmap bitmap = null;
+                                    try {
+                                        bitmap = ImageDecoder.decodeBitmap(imageSource);
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
 
-                                if(bitmap != null)
-                                    fragment.drawVideo(bitmap);
+    //                                Log.i("ClientThread", "bitmap=" + bitmap);
+    //                                                    Log.i("x", "VIJEO w=" + bitmap.getWidth() +
+    //                                                            " h=" + bitmap.getHeight() +
+    //                                                            " " + bitmap.getColorSpace());
+
+                                    if(bitmap != null)
+                                        fragment.drawVideo(bitmap);
+                                }
                             }
                             else if(type == STATUS)
                             {

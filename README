@@ -19,6 +19,8 @@ tracker_trt.c: The mane camera tracker on the jetson nano.
     Run it with ./tracker_trt
 
     Uses either local servos.X or truck's arm_cam.c to drive the servos.
+    Uses bits from truckcam & truck.
+
 
 comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack.  
     It was envisioned as controlling the tracker but is not currently used.
@@ -61,6 +63,7 @@ enclosure4.FCStd: obsolete enclosure for a jetson nano terminal
     16 gauge metal rod for hinges
     6mm x 3mm magnets
 
+enclosure5.FCStd: latest enclosure for a headless jetson nano
 
 
 knob.FCStd: bits for mounting a camera on a pan/tilt head
