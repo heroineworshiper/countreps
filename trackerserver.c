@@ -1,6 +1,6 @@
 /*
  * Server for the tracking camera
- * Copyright (C) 2019-2021 Adam Williams <broadcast at earthling dot net>
+ * Copyright (C) 2019-2023 Adam Williams <broadcast at earthling dot net>
  * 
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -74,8 +74,10 @@ sem_t data_ready;
 uint8_t *keypoint_buffer2 = 0;
 int keypoint_size2 = 0;
 int current_input2 = -1;
-uint8_t status_buffer[HEADER_SIZE + 32];
+uint8_t status_buffer[HEADER_SIZE + 256];
 int status_size = 0;
+uint8_t settings_buffer[SETTINGS_SIZE];
+int have_settings = 0;
 
 // storage for packet header, keypoints & compressed frame
 extern uint8_t vijeo_buffer[];
@@ -399,6 +401,13 @@ void send_status()
     status_buffer[offset++] = landscape;
     status_buffer[offset++] = error_flags;
 
+// copy the last settings packet
+    if(have_settings)
+    {
+        memcpy(status_buffer + offset, settings_buffer, SETTINGS_SIZE);
+        offset += SETTINGS_SIZE;
+    }
+
     prev_error_flags = error_flags;
 
     status_size = offset - HEADER_SIZE;
@@ -641,37 +650,49 @@ void* web_server_reader(void *ptr)
             } // state == GET_COMMAND
             else
             {
-                packet[counter++] = c;
-                if(counter >= 3)
+                settings_buffer[counter++] = c;
+                if(counter >= SETTINGS_SIZE)
                 {
+printf("web_server_reader %d: settings=\n", __LINE__);
+int j;
+for(j = 0; j < SETTINGS_SIZE; j++) printf(" %02x", settings_buffer[j]);
+printf("\n");
+                    have_settings = 1;
                     state = GET_COMMAND;
                     int changed = 0;
-                    if(packet[0] != 0xff && packet[0] != is_truck) 
+                    if(settings_buffer[0] != is_truck) 
                     {
-                        is_truck = packet[0];
+                        is_truck = settings_buffer[0];
                         changed = 1;
                     }
-                    
-                    if(packet[1] != 0xff && packet[1] != deadband)
+
+                    if(settings_buffer[1] != deadband)
                     {
-                        deadband = packet[1];
+                        deadband = settings_buffer[1];
                         changed = 1;
                     }
-                    
-                    if(packet[2] != 0xff && packet[2] != speed) 
+
+                    if(settings_buffer[2] != speed) 
                     {
-                        speed = packet[2];
+                        speed = settings_buffer[2];
                         changed = 1;
                     }
+
+//                    if(memcmp(servo_config, settings_buffer + 3, SERVO_CONFIG_SIZE))
+//                    {
+                        memcpy(servo_config, settings_buffer + 3, SERVO_CONFIG_SIZE);
+                        have_servo_config = 1;
+                        changed = 1;
+                        write_servo_config();
+//                    }
 
                     if(changed) 
                     {
                         save_defaults();
-                        dump_settings();
                     }
+                    dump_settings();
                     send_status();
                 }
-                
             } // state == GET_SETTINGS
         } // i < bytes_read
     } // 1

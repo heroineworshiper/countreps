@@ -57,6 +57,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     ClientThread client;
 // in case frames come in faster than we can draw them
     static boolean busy = false;
+    boolean needRedraw = false;
 
 // keypoints for the next frame
     static int animals = 0;
@@ -174,6 +175,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     Button lensButton;
     Button tiltButton;
     Button panButton;
+    Button settingsButton;
     Text panText;
     Text tiltText;
     Text videoDeviceError;
@@ -185,6 +187,8 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     static final int MARGIN = 40;
     static final int ARROW_MARGIN = 20;
     static final int TEXT_SIZE = 40;
+    static final String settingsText = "SEND CONFIG";
+    long startTime;
 
     @Override
     public View onCreateView(
@@ -205,16 +209,18 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         binding = FragmentFirstBinding.inflate(inflater, container, false);
         video = binding.surfaceView2;
 
+Log.i("x", "onCreateView");
 
 
 
 
-      return binding.getRoot();
+        return binding.getRoot();
 
     }
 
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+Log.i("x", "onViewCreated");
 
         binding.buttonFirst.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -235,15 +241,31 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         videoCanvas = new Canvas();
         videoCanvas.setBitmap(videoBitmap);
 
+        needRedraw = true;
 
         new Thread(client = new ClientThread(this)).start();
-
     }
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
-        binding = null;
+Log.i("x", "onDestroyView");
+    }
+
+    @Override
+    public void onPause()
+    {
+        super.onPause();
+Log.i("x", "onPause");
+    }
+
+    @Override
+    public void onResume()
+    {
+        super.onResume();
+Log.i("x", "onResume");
+        busy = false;
+        needRedraw = true;
     }
 
     // wait for the surface view to be created
@@ -362,7 +384,6 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
 
     boolean updateErrors()
     {
-        boolean needRedraw = false;
         needRedraw |= videoDeviceError.setHidden((errors & VIDEO_DEVICE_ERROR) == 0);
         needRedraw |= videoIoctlError.setHidden((errors & VIDEO_BUFFER_ERROR) == 0);
         needRedraw |= servoError.setHidden((errors & SERVO_ERROR) == 0);
@@ -375,7 +396,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         getActivity().runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                boolean needRedraw = false;
+//Log.i("x", "updateValues 1");
                 if (panButton != null) {
                     needRedraw |= panButton.updateText(String.valueOf(pan_sign));
                 }
@@ -398,15 +419,27 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                 {
                     needRedraw |= landscapeButton.updateText(landscapeText());
                 }
+                
+                if(settingsButton != null)
+                {
+// show the * for a minimum time
+                    long currentTime = System.currentTimeMillis();
+                    long diffTime = currentTime - startTime;
+                    if((diffTime >= 500 && settingsButton.text.contains("*") && !ClientThread.needSettings) ||
+                        (!settingsButton.text.contains("*") && ClientThread.needSettings))
+                        needRedraw |= true;
+                }
 
                 needRedraw |= updateErrors();
 
+//Log.i("x", "updateValues 2 needRedraw=" + needRedraw);
                 if(needRedraw) {
                     Canvas canvas = video.getHolder().lockCanvas();
                     if (canvas != null) {
                         drawGUI(canvas);
                         video.getHolder().unlockCanvasAndPost(canvas);
                     }
+                    needRedraw = false;
                 }
             }
         });
@@ -422,7 +455,8 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         tiltText = null;
         lensButton = null;
         landscapeButton = null;
-
+        settingsButton = null;
+Log.i("x", "changeOperationSync");
 
 
         Canvas canvas = video.getHolder().lockCanvas();
@@ -544,6 +578,31 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                         }
                     };
                     buttons.add(b);
+
+
+
+
+
+                    if(client.isTruck)
+                    {
+                        text = settingsText;
+                        if(landscape) {
+                            x = canvas.getWidth() * 1 / 3;
+                            y = canvas.getHeight() / 4;
+                        }
+
+                        settingsButton = new Button(x, y, text);
+                        settingsButton.listener = new Button.ButtonListener() {
+                            @Override
+                            public void onClick() {
+                                Log.i("FirstFragment", settingsText);
+                                startTime = System.currentTimeMillis();
+                                client.sendSettings();
+                            }
+                        };
+                        buttons.add(settingsButton);
+                    }
+
                     break;
                 }
 
@@ -864,26 +923,32 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
                     };
                     buttons.add(b);
 
-                    text = "BACK";
-                    size = Button.calculateSize(text, null);
-                    if(landscape) {
-                        x = canvas.getWidth() / 2 - MARGIN / 2 - size.width() / 2;
-                        y = MARGIN + size.height() / 2;
-                    }
-                    else
+
+                    if(!client.isTruck)
                     {
-                        x = canvas.getWidth() - MARGIN - size.width() / 2;
-                    }
-                    b = new Button(x,
-                            y, text);
-                    b.listener = new Button.ButtonListener() {
-                        @Override
-                        public void onClick() {
-                            Log.i("FirstFragment", "BACK");
-                            client.sendCommand('b');
+                        text = "BACK";
+                        size = Button.calculateSize(text, null);
+                        if(landscape) {
+                            x = canvas.getWidth() / 2 - MARGIN / 2 - size.width() / 2;
+                            y = MARGIN + size.height() / 2;
                         }
-                    };
-                    buttons.add(b);
+                        else
+                        {
+                            x = canvas.getWidth() - MARGIN - size.width() / 2;
+                        }
+                        b = new Button(x,
+                                y, text);
+                        b.listener = new Button.ButtonListener() {
+                            @Override
+                            public void onClick() {
+                                Log.i("FirstFragment", "BACK");
+                                client.sendCommand('b');
+                            }
+                        };
+                        buttons.add(b);
+                    }
+                    
+                    
                     break;
                 }
             }
@@ -1093,6 +1158,15 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         
         if(fpsText != null) fpsText.updateText(formatter.format("%.02f", fps).toString());
 
+// update settings button
+        if(settingsButton != null) 
+        {
+            if(ClientThread.needSettings)
+                settingsButton.updateText(settingsText + "*");
+            else
+                settingsButton.updateText(settingsText);
+        }
+
         for (int i = 0; i < buttons.size(); i++)
         {
             buttons.get(i).draw(canvas);
@@ -1102,9 +1176,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
         {
             texts.get(i).draw(canvas);
         }
-
-
-
+//Log.i("x", "drawGUI");
     }
 
 
@@ -1178,9 +1250,8 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
     @Override
     public boolean onTouch(View view, MotionEvent motionEvent) {
         int pointers = motionEvent.getPointerCount();
-        Log.i("FirstFragment", "motionEvent.getAction()=" + motionEvent.getAction());
+        Log.i("x", "onTouch motionEvent.getAction()=" + motionEvent.getAction());
 
-        boolean needRedraw = false;
         for(int i = 0; i < buttons.size(); i++)
         {
             if(buttons.get(i).onTouch(motionEvent))
@@ -1195,6 +1266,7 @@ public class FirstFragment extends Fragment implements View.OnTouchListener, Sen
             Canvas canvas = video.getHolder().lockCanvas();
             drawGUI(canvas);
             video.getHolder().unlockCanvasAndPost(canvas);
+            needRedraw = false;
         }
 
         return true;

@@ -325,6 +325,10 @@ int adc = 0;
 int deadband = 5;
 int speed = 100;
 
+// packet to forward to the servo panner
+uint8_t servo_config[SERVO_CONFIG_SIZE];
+int have_servo_config = 0;
+
 static int servo_fd = -1;
 static int frames = 0;
 static FILE *ffmpeg_fd = 0;
@@ -572,6 +576,23 @@ int init_servos()
 
 }
 
+// not to be called while tracking
+void write_servo_config()
+{
+    if(servo_fd >= 0)
+    {
+        if(is_truck)
+        {
+            uint8_t buffer[SERVO_CONFIG_SIZE + 2];
+            buffer[0] = 0xff;
+            buffer[1] = 0xcf;
+            memcpy(buffer + 2, servo_config, SERVO_CONFIG_SIZE);
+            int temp = write(servo_fd, buffer, SERVO_CONFIG_SIZE + 2);
+            have_servo_config = 0;
+        }
+    }
+}
+
 void write_servos(int use_pwm_limits)
 {
 	if(servo_fd >= 0)
@@ -579,9 +600,11 @@ void write_servos(int use_pwm_limits)
         if(is_truck)
         {
 // 1 axis
-            char buffer[1];
-            buffer[0] = adc;
-		    int temp = write(servo_fd, buffer, 1);
+            uint8_t buffer[3];
+            buffer[0] = 0xff;
+            buffer[1] = 0xd2;
+            buffer[2] = adc;
+	    int temp = write(servo_fd, buffer, 3);
 //printf("write_servos %d %d\n", __LINE__, adc);
         }
         else
@@ -667,12 +690,12 @@ void do_startup()
     }
 }
 
-
+#define SETTINGS_DIR "/root"
 void load_defaults()
 {
 // HOME not available in /etc/rc.local
 //    char *home = getenv("HOME");
-    char *home = "/root";
+    const char *home = SETTINGS_DIR;
     char string[TEXTLEN];
     sprintf(string, "%s/.tracker.rc", home);
     FILE *fd = fopen(string, "r");
@@ -797,7 +820,7 @@ void save_defaults()
 {
 // HOME not available in /etc/rc.local
 //    char *home = getenv("HOME");
-    char *home = "/root";
+    const char *home = SETTINGS_DIR;
     char string[TEXTLEN];
     sprintf(string, "%s/.tracker.rc", home);
     FILE *fd = fopen(string, "w");

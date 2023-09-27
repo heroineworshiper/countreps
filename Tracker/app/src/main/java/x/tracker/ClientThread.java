@@ -30,10 +30,22 @@ class ClientThread implements Runnable {
     static final int SEND_PORT = 1234;
     static final int RECV_PORT = 1235;
     static final String SETTINGS = "/sdcard/tracker/settings.txt";
+    static boolean isTruck = true;
+    static int deadband = 5;
+    static int speed = 100;
+// motion control hack for servo
+    static boolean doMotion = false;
+    static int motionSpeed = 60;
+    static int motionLen = 1000;
+    static int timelapseSpeed = 1;
 
     static Socket socket;
     byte[] header = new byte[8];
     byte[] packet = new byte[65536];
+    final int SETTINGS_SIZE = 10;
+    byte[] settingsPacket = new byte[1 + SETTINGS_SIZE];
+// send settings packet until the readback matches
+    static boolean needSettings = false;
 
     final int GET_START_CODE0 = 0;
     final int GET_START_CODE1 = 1;
@@ -99,6 +111,7 @@ class ClientThread implements Runnable {
         }
         else
         {
+//Log.i("x", "handleStatus");
             fragment.updateValues();
         }
     }
@@ -119,6 +132,19 @@ class ClientThread implements Runnable {
                             address,
                             SEND_PORT);
                         socket.send(packet);
+
+// send the settings with a * command
+                        if(needSettings && id == '*')
+                        {
+                            packet = new DatagramPacket(
+                                settingsPacket,
+                                settingsPacket.length,
+                                address,
+                                SEND_PORT);
+                            socket.send(packet);
+                        }
+                        
+                        
                         socket.close();
                     } catch (IOException e) {
                         e.printStackTrace();
@@ -157,6 +183,47 @@ class ClientThread implements Runnable {
                 {
                     SERVER = value;
                 }
+                else
+                if(key.equalsIgnoreCase("TRUCK"))
+                {
+                    if(Integer.parseInt(value) >= 1)
+                        isTruck = true;
+                    else
+                        isTruck = false;
+                }
+                else
+                if(key.equalsIgnoreCase("DEADBAND"))
+                {
+                    deadband = Integer.parseInt(value);
+                }
+                else
+                if(key.equalsIgnoreCase("SPEED"))
+                {
+                    speed = Integer.parseInt(value);
+                }
+                else
+                if(key.equalsIgnoreCase("MOTION_CONTROL"))
+                {
+                    if(Integer.parseInt(value) >= 1)
+                        doMotion = true;
+                    else
+                        doMotion = false;
+                }
+                else
+                if(key.equalsIgnoreCase("MOTION_SPEED"))
+                {
+                    motionSpeed = Integer.parseInt(value);
+                }
+                else
+                if(key.equalsIgnoreCase("MOTION_LEN"))
+                {
+                    motionLen = Integer.parseInt(value);
+                }
+                else
+                if(key.equalsIgnoreCase("TIMELAPSE_SPEED"))
+                {
+                    timelapseSpeed = Integer.parseInt(value);
+                }
             }
             reader.close();
 
@@ -166,24 +233,65 @@ class ClientThread implements Runnable {
         }
     }
 
+
+    public void sendSettings() {
+        pool.execute(new Runnable() {
+
+            @Override
+            public void run() {
+                synchronized(this)
+                {
+// reread the file
+                    readSettings();
+                    settingsPacket[0] = 's';
+                    if(isTruck)
+                        settingsPacket[1] = (byte)1;
+                    else
+                        settingsPacket[1] = (byte)0;
+                    settingsPacket[2] = (byte)deadband;
+                    settingsPacket[3] = (byte)speed;
+                    if(doMotion)
+                        settingsPacket[4] = (byte)1;
+                    else
+                        settingsPacket[4] = (byte)0;
+                    settingsPacket[5] = (byte)motionSpeed;
+                    write_int32(settingsPacket, 6, motionLen);
+                    settingsPacket[10] = (byte)timelapseSpeed;
+printBuffer("sendSettings", settingsPacket, 1, SETTINGS_SIZE);
+
+// send it with the next *
+                    needSettings = true;
+                }
+            }
+        });
+    }
+
+
+
     @Override
     public void run() {
         DatagramSocket socket = null;
-        try {
-            socket = new DatagramSocket(RECV_PORT);
-            socket.setSoTimeout(1000);
-        } catch (SocketException e) {
-            e.printStackTrace();
-        }
         fragment.waitForSurface();
 
         readSettings();
 // ping the server
         Log.i("ClientThread", "server=" + SERVER + ":" + RECV_PORT);
         boolean gotStatus = false;
-        sendCommand('*');
 
         while (true) {
+            if(socket == null)
+            {
+                try {
+                    socket = new DatagramSocket(RECV_PORT);
+                    socket.setSoTimeout(1000);
+                } catch (SocketException e) {
+                    e.printStackTrace();
+                }
+// didn't get a packet from the server
+                sendCommand('*');
+            }
+
+
             // read stream from server
             byte[] buffer = new byte[0x100000];
             DatagramPacket packet_ = new DatagramPacket(buffer, buffer.length);
@@ -192,21 +300,15 @@ class ClientThread implements Runnable {
             try {
                 socket.receive(packet_);
             } catch (IOException e) {
-//                e.printStackTrace();
+//              e.printStackTrace();
                 timeout = true;
             }
 
             if(timeout)
             {
                 Log.i("ClientThread", "server timed out");
-                try {
-                    socket.close();
-                    socket = new DatagramSocket(RECV_PORT);
-                    socket.setSoTimeout(1000);
-                } catch (SocketException e) {
-                    e.printStackTrace();
-                }
-                sendCommand('*');
+                socket.close();
+                socket = null;
                 bytes_read = 0;
             }
             else
@@ -264,7 +366,8 @@ class ClientThread implements Runnable {
                             //Log.i("ClientThread", "GET_DATA type=" + type);
                             if(type == VIJEO)
                             {
-                                Log.i("ClientThread", "VIJEO size=" + dataSize);
+                                Log.i("ClientThread", "VIJEO size=" + dataSize + 
+                                    " busy=" + FirstFragment.busy);
 
                                 if(!FirstFragment.busy)
                                 {
@@ -314,16 +417,47 @@ class ClientThread implements Runnable {
                                 fragment.prevOperation = fragment.currentOperation;
                                 fragment.prevLandscape = fragment.landscape;
 
-                                fragment.currentOperation = packet[0];
-                                fragment.pan = read_int32(packet, 2);
-                                fragment.tilt = read_int32(packet, 6);
-                                fragment.start_pan = read_int32(packet, 10);
-                                fragment.start_tilt = read_int32(packet, 14);
-                                fragment.pan_sign = packet[18];
-                                fragment.tilt_sign = packet[19];
-                                fragment.lens = packet[20];
-                                fragment.landscape = (packet[21] == 1 ? true : false);
-                                fragment.errors = packet[22] & 0xff;
+                                int offset = 0;
+                                fragment.currentOperation = packet[offset];
+                                offset += 2;
+                                fragment.pan = read_int32(packet, offset);
+                                offset += 4;
+                                fragment.tilt = read_int32(packet, offset);
+                                offset += 4;
+                                fragment.start_pan = read_int32(packet, offset);
+                                offset += 4;
+                                fragment.start_tilt = read_int32(packet, offset);
+                                offset += 4;
+                                fragment.pan_sign = packet[offset];
+                                offset++;
+                                fragment.tilt_sign = packet[offset];
+                                offset++;
+                                fragment.lens = packet[offset];
+                                offset++;
+                                fragment.landscape = (packet[offset] == 1 ? true : false);
+                                offset++;
+                                fragment.errors = packet[offset] & 0xff;
+                                offset++;
+
+//Log.i("x", "needSettings=" + needSettings + " dataSize=" + dataSize);
+                                if(needSettings && dataSize >= offset + SETTINGS_SIZE)
+                                {
+                                    boolean gotIt = true;
+//printBuffer("x", packet, offset, SETTINGS_SIZE);
+                                    for(int j = 0; j < SETTINGS_SIZE; j++)
+                                    {
+                                        if(packet[offset + j] != settingsPacket[1 + j])
+                                        {
+                                            gotIt = false;
+                                            break;
+                                        }
+                                    }
+                                    if(gotIt)
+                                    {
+Log.i("x", "gotIt"); 
+                                        needSettings = false;
+                                    }
+                                }
 
                                 Log.i("ClientThread", "STATUS" +
                                         " currentOperation=" + fragment.currentOperation +
@@ -342,9 +476,9 @@ class ClientThread implements Runnable {
 
                             packetState = GET_START_CODE0;
 
-                            if(!gotStatus)
+                            if(!gotStatus || needSettings)
                             {
-// ping the server to get a 1st status packet
+// ping the server to get a 1st status packet or to update settings
                                 sendCommand('*');
                             }
                         }

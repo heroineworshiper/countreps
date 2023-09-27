@@ -120,6 +120,12 @@ extern int is_truck;
 extern int deadband;
 extern int speed;
 
+#define SETTINGS_SIZE 10
+// packet to forward to the servo panner
+#define SERVO_CONFIG_SIZE 7
+extern uint8_t servo_config[SERVO_CONFIG_SIZE];
+extern int have_servo_config;
+
 // error bits
 // /dev/video* doesn't exist
 #define DEV_VIDEO_ERROR 1
@@ -214,6 +220,7 @@ void send_error();
 void init_server();
 void do_startup();
 void do_tracking(int lock);
+void write_servo_config();
 
 
 #endif

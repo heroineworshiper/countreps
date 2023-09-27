@@ -19,7 +19,7 @@ tracker_trt.c: The mane camera tracker on the jetson nano.
     Run it with ./tracker_trt
 
     Uses either local servos.X or truck's arm_cam.c to drive the servos.
-    Uses bits from truckcam & truck.
+    Uses mechanical bits from truckcam & truck.
 
 
 comcast.X comcast2.pcb irlib.c: Comcast XR16 remote hack.  
