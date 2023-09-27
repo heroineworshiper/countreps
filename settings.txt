@@ -1,8 +1,26 @@
+# settings for 1 axis camera tracker
 # copy this to /sdcard/tracker/
 
 
 # address in the field
 ADDRESS 10.0.2.1
 
+# mode.  reboot required
+TRUCK 1
 
+# settings for truck mode follow
+# machine vision tracking
+# 0 - 100
+DEADBAND 5
+# 0 - 100
+SPEED 100
 
+# manual servo control
+# 0 or 1
+MOTION_CONTROL 1
+# 1-80
+MOTION_SPEED 30
+# MS
+MOTION_LEN 2000
+# 1-80.  1 = 1:20 timelapse
+TIMELAPSE_SPEED 1

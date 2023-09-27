@@ -34,6 +34,7 @@ servos.X: USB to PWM firmware for the 2 axis tracker
 
 servos.FCStd: enclosure for servo board
 
+settings.txt: file that goes in /sdcard/tracker
 
 enclosure4.FCStd: obsolete enclosure for a jetson nano terminal
     .8mm nozzle .32 layer height for
